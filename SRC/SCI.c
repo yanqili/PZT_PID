@@ -1,5 +1,6 @@
 #include "DSP2833x_Device.h"     // DSP2833x Headerfile Include File
 #include "DSP2833x_Examples.h"   // DSP2833x Examples Include File
+#include "SCI_queue.h"
 
 //宏定义
 //#define DEBUG
@@ -170,6 +171,7 @@ void main(void)
    spi_fifo_init();
 
    INTConfig();
+   Uart_Queue_Init(&UART1_queue);
 
    AD_RST;
    DELAY_US(100000);
@@ -219,6 +221,18 @@ void main(void)
        DELAY_US(50000);
        LED3=~LED3;
        DELAY_US(50000);
+       if(Uart_Queue_getAcmd(&UART1_cmd,&UART1_queue))
+       {
+    	      rdataA[0]=0x5A;
+    	      rdataA[1]=0xFF;
+    	      rdataA[2]=UART1_cmd.cmd_buffer_R[0];
+    	      rdataA[3]=UART1_cmd.cmd_buffer_R[1];
+    	      rdataA[4]=UART1_cmd.cmd_buffer_R[2];
+    	      rdataA[5]=UART1_cmd.cmd_buffer_R[3];
+    	      rdataA[6]=UART1_cmd.cmd_buffer_R[4];
+    	      rdataA[7]=UART1_cmd.cmd_buffer_R[5];
+    	      SendData(rdataA);
+       }
 #ifdef DEBUG
 	   if(rdataA[0]==0x5A)
 	   {
@@ -602,21 +616,14 @@ interrupt void scibTxFifoIsr(void)
 ********************************************************************************************************/
 interrupt void scibRxFifoIsr(void)
 {
-	unsigned char fifocnt;
+	unsigned char a,b;
     DINT;//关总中断
 
 
-    rdataA[0]=ScibRegs.SCIRXBUF.all;	 // Read data
-    rdataA[1]= 0x01;
-    rdataA[2]= 0x02;
-    rdataA[3]= 0x03;
-    rdataA[4]= 0x04;
-    rdataA[5]= 0x05;
-    rdataA[6]= 0x06;
-    rdataA[7]= 0x07;
+    a=ScibRegs.SCIRXBUF.all;	 // Read data
+    Uart_Queue_pushAchar(&UART1_queue,a);
 
 
-	SendData(rdataA);
 	//ScibRegs.SCIFFTX.bit.TXFFINTCLR=1;  // Clear Interrupt flag
 	ScibRegs.SCIFFRX.bit.RXFFOVRCLR=1;  // Clear Overflow flag
 	ScibRegs.SCIFFRX.bit.RXFFINTCLR=1; 	// Clear Interrupt flag
