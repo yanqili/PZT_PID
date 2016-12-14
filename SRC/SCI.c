@@ -223,15 +223,21 @@ void main(void)
        DELAY_US(50000);
        if(Uart_Queue_getAcmd(&UART1_cmd,&UART1_queue))
        {
-    	      rdataA[0]=0x5A;
-    	      rdataA[1]=0xFF;
-    	      rdataA[2]=UART1_cmd.cmd_buffer_R[0];
-    	      rdataA[3]=UART1_cmd.cmd_buffer_R[1];
-    	      rdataA[4]=UART1_cmd.cmd_buffer_R[2];
-    	      rdataA[5]=UART1_cmd.cmd_buffer_R[3];
-    	      rdataA[6]=UART1_cmd.cmd_buffer_R[4];
-    	      rdataA[7]=UART1_cmd.cmd_buffer_R[5];
-    	      SendData(rdataA);
+
+    	   if(UART1_cmd.cmd_buffer_R[0]==0xB1)
+            {
+            	   rdataA[0]=0x5A;
+            	   rdataA[1]=0xFF;
+            	   rdataA[2]=0x01;
+            	   rdataA[3]=0x01;
+            	   rdataA[4]=0xFF;
+            	   rdataA[5]=0x01;
+            	   rdataA[6]=0x01;
+            	   rdataA[7]=0x23;
+            	   SendData(rdataA);
+
+            }
+
        }
 #ifdef DEBUG
 	   if(rdataA[0]==0x5A)

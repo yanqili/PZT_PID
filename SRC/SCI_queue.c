@@ -59,6 +59,7 @@ unsigned char Uart_Queue_size(QUEUE *UARTX_queue)
    return ((UARTX_queue->_tail+QUEUE_MAX_SIZE-UARTX_queue->_head)%QUEUE_MAX_SIZE);
 }
 
+
 /********************************
 *名    称： Uart＿Queue＿getAcmd
 *功    能： 获取一帧完整的指令
@@ -74,36 +75,43 @@ unsigned char Uart_Queue_getAcmd(SERIALCMD *UARTX_cmd,QUEUE *UARTX_queue)
     {
         //取一个数据
         Uart_Queue_popAchar(UARTX_queue,&cmd_data);
+
         switch(UARTX_cmd->cmd_status)
 				{
-					case WAIT_FRAME1:                  //等待帧首1  0x42
-						 if(cmd_data==0x42)
-						 {
-						    UARTX_cmd->cmd_status = WAIT_FRAME2;
-						 }
-
-					break;
-				  case WAIT_FRAME2:                 //等待帧首2   0x4d
-						 if(cmd_data==0x4d)
+					case WAIT_FRAME1:                  //等待帧首1  0x5A
+						 if(cmd_data==0x5A)
 						 {
 						    UARTX_cmd->cmd_status = WAIT_DATA;
 						 }
-						 else
-							  UARTX_cmd->cmd_status = WAIT_FRAME1;
 
 					break;
-				  case WAIT_DATA:                  //找到了帧首，存入后面的数据
+
+				    case WAIT_DATA:                  //找到了帧首，存入后面的数据
 						  if(UARTX_cmd->cmd_buffer_pointer<6)
 							{
                 	UARTX_cmd->cmd_buffer_R[UARTX_cmd->cmd_buffer_pointer]=cmd_data;
                		UARTX_cmd->cmd_buffer_pointer++;
 							}
 						  if(UARTX_cmd->cmd_buffer_pointer==6)
-							{
-							    UARTX_cmd->cmd_buffer_pointer=0;
-				          UARTX_cmd->cmd_status=0;
+						  {
+							  UARTX_cmd->cmd_status = WAIT_OVER;
+
+						  }
+				    break;
+
+				    case WAIT_OVER:
+
+							  if(cmd_data==0x23)
+							  {
+								  UARTX_cmd->cmd_buffer_pointer=0;
+								  UARTX_cmd->cmd_status=0;
 								  return 1;   //得到了一个完整的帧
-							}
+							  }
+							  else
+							  {
+								 UARTX_cmd->cmd_status = WAIT_FRAME1;
+								 UARTX_cmd->cmd_buffer_pointer=0;
+							  }
 
 					break;
 				}

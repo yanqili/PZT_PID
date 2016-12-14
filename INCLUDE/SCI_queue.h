@@ -6,7 +6,7 @@
 #define _UART1 0x01  //因为STM32原来的程序里定义过USART，为了避免重定义，所以前后加横杠
 #define _UART2 0x02  //
 #define WAIT_FRAME1  0
-#define WAIT_FRAME2  1
+#define WAIT_OVER    1
 #define WAIT_DATA    2
 #define GET_CMD_OK   3
 
