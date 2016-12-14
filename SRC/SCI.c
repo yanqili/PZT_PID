@@ -36,7 +36,7 @@
 // Prototype statements for functions found within this file.
 void INTConfig(void);
 void InitXintf(void);
-void SendData(unsigned char *buf);
+void SCIB_send_cmd(unsigned char *buf);
 void SendCmd(unsigned char *buf);
 void CfgScia(void);
 void CfgScib(void);
@@ -65,8 +65,9 @@ interrupt void ISRTimer1(void);
 interrupt void ISRTimer2(void);
 
 // Global counts used in this example
-unsigned char sdataA[8];    // Send data for SCI-A
-unsigned char rdataA[8];    // Received data for SCI-A
+unsigned char sdataB[8];    // Send data for SCI-B
+unsigned char dataB[6];    // the cmd for SCIB
+unsigned char testdata[8];    // Received data for SCI-A
 unsigned char sdataC[12];		//Send data for SCI-C
 char tst[]="abcdefghijkl";
 char cmdupdate=0;	//0为未更新，1为已更新
@@ -78,8 +79,8 @@ unsigned char flow_out[3]={0};	//流量输出
 unsigned char CMD[12];	//总命令输出
 Uint32 T1=0,T2=0,T3=0,T4=0;
 int32 pre_sensor=0, flow_sensor=0;
-unsigned char pre_cmd_data[8], pre_act_data[8];
-unsigned char flow_cmd_data[8], flow_act_data[8];
+
+
 //PID参数
 //int32 err_pre[3];
 int32 err_flow[3];
@@ -171,7 +172,7 @@ void main(void)
    spi_fifo_init();
 
    INTConfig();
-   Uart_Queue_Init(&UART1_queue);
+   Uart_Queue_Init(&UARTb_queue);
 
    AD_RST;
    DELAY_US(100000);
@@ -200,15 +201,14 @@ void main(void)
    LED4=1;
    DELAY_US(10);
 #endif
-   rdataA[0]=0x5A;
-   rdataA[1]=0x01;
-   rdataA[2]=0x01;
-   rdataA[3]=0x01;
-   rdataA[4]=0x01;
-   rdataA[5]=0x01;
-   rdataA[6]=0x01;
-   rdataA[7]=0x23;
-   SendData(rdataA);
+   testdata[0]=0x5A;
+   testdata[1]=0x01;
+   testdata[2]=0x01;
+   testdata[3]=0x01;
+   testdata[4]=0x01;
+   testdata[5]=0x01;
+
+   SCIB_send_cmd(testdata);
    while(1)
    {
 	   if(gStatus==100)
@@ -221,29 +221,28 @@ void main(void)
        DELAY_US(50000);
        LED3=~LED3;
        DELAY_US(50000);
-       if(Uart_Queue_getAcmd(&UART1_cmd,&UART1_queue))
+       if(Uart_Queue_getAcmd(&UARTb_cmd,&UARTb_queue))
        {
 
-    	   if(UART1_cmd.cmd_buffer_R[0]==0xB1)
+    	   if(UARTb_cmd.cmd_buffer_R[0]==0xB1)
             {
-            	   rdataA[0]=0x5A;
-            	   rdataA[1]=0xFF;
-            	   rdataA[2]=0x01;
-            	   rdataA[3]=0x01;
-            	   rdataA[4]=0xFF;
-            	   rdataA[5]=0x01;
-            	   rdataA[6]=0x01;
-            	   rdataA[7]=0x23;
-            	   SendData(rdataA);
+            	   dataB[0]=0xB1;
+            	   dataB[1]=0xAA;
+            	   dataB[2]=0x00;
+            	   dataB[3]=0x00;
+            	   dataB[4]=0x00;
+            	   dataB[5]=0x00;
+
+            	   SCIB_send_cmd(dataB);
 
             }
 
        }
 #ifdef DEBUG
-	   if(rdataA[0]==0x5A)
+	   if(testdata[0]==0x5A)
 	   {
 		   //CfgScic();
-		   SendData(rdataA);
+		   SCIB_send_cmd(testdata);
 	   }
 	   else
 	   {
@@ -251,7 +250,7 @@ void main(void)
 		   SendCmd(tst);
 	   }
 	   //SciaRegs.SCIFFTX.bit.TXFFINT=1;
-	   //SendData(tst);
+	   //SCIB_send_cmd(tst);
 	   DELAY_US(1000000);
 #endif
    }
@@ -294,19 +293,14 @@ void InitParameter(void)
 	flow_cal[0]=0;
 	flow_cal[1]=0;
 	for(i=0;i<8;i++)
-		rdataA[i]=0;
+		testdata[i]=0;
 	for(i=0;i<8;i++)
-		sdataA[i]=0;
+		sdataB[i]=0;
 	for(i=0;i<12;i++)
 		sdataC[i]=0;
-	for(i=0;i<8;i++)
-		pre_cmd_data[i]=0;
-	for(i=0;i<8;i++)
-		pre_act_data[i]=0;
-	for(i=0;i<8;i++)
-		flow_cmd_data[i]=0;
-	for(i=0;i<8;i++)
-		flow_act_data[i]=0;
+	for(i=0;i<6;i++)
+		dataB[i]=0;
+
 	for(i=0;i<3;i++)
 		err_flow[i]=0;
 	for(i=0;i<12;i++)
@@ -321,22 +315,9 @@ void InitParameter(void)
 	CMD[0]=0xAA;
 	CMD[1]=0xBB;
 	CMD[2]=9;
-	pre_cmd_data[0]=0x5A;
-	pre_cmd_data[1]=0xB2;
-	pre_cmd_data[2]=0xAA;
-	pre_cmd_data[7]=0x23;
-	pre_act_data[0]=0x5A;
-	pre_act_data[1]=0xB2;
-	pre_act_data[2]=0x55;
-	pre_act_data[7]=0x23;
-	flow_cmd_data[0]=0x5A;
-	flow_cmd_data[1]=0xB4;
-	flow_cmd_data[2]=0xAA;
-	flow_cmd_data[7]=0x23;
-	flow_act_data[0]=0x5A;
-	flow_act_data[1]=0xB4;
-	flow_act_data[2]=0x55;
-	flow_act_data[7]=0x23;
+	sdataB[0]=0x5A;
+	sdataB[7]=0x23;
+
 }
 
 void ADInit(void)
@@ -448,7 +429,7 @@ interrupt void sciaTxFifoIsr(void)
 	unsigned char fifocnt;
 	for(fifocnt=0; fifocnt< 8; fifocnt++)
 	{
-		SciaRegs.SCITXBUF=sdataA[fifocnt];     // Send data
+		SciaRegs.SCITXBUF=sdataB[fifocnt];     // Send data
 	}
 	//SciaRegs.SCIFFTX.bit.TXFFINTCLR=1;  // 清此标志位表示中断可以产生
 	PieCtrlRegs.PIEACK.bit.ACK9=1;      // Issue PIE ACK
@@ -476,27 +457,27 @@ interrupt void sciaRxFifoIsr(void)
 
 	for(fifocnt=0;fifocnt<8;fifocnt++)
 	{
-	   rdataA[fifocnt]=SciaRegs.SCIRXBUF.all;	 // Read data
+	   testdata[fifocnt]=SciaRegs.SCIRXBUF.all;	 // Read data
 	}
 
-	if(rdataA[0]==0x5A)
+	if(testdata[0]==0x5A)
 	{
 		len=6;
-		checksum=XorCheckSum(rdataA, len);
-		if(checksum == rdataA[len] && rdataA[len+1] == 0x23)
+		checksum=XorCheckSum(testdata, len);
+		if(checksum == testdata[len] && testdata[len+1] == 0x23)
 		{
-			switch(rdataA[1])
+			switch(testdata[1])
 			{
 				//启动停止压力控制
 				case 0xB1:
 					SWITCH_FLAG=0;//PID与控制程序的切换开关
-					if(rdataA[2]==0xAA)
+					if(testdata[2]==0xAA)
 					{
-						PrePID.SetCmd = BUILD_UINT32(rdataA[5], rdataA[4], rdataA[3]);
+						PrePID.SetCmd = BUILD_UINT32(testdata[5], testdata[4], testdata[3]);
 						StopCpuTimer1();
 						StartCpuTimer0();	//开启定时器，开始进行PID控制
 					}
-					else if(rdataA[2]==0x55)
+					else if(testdata[2]==0x55)
 					{
 						StopCpuTimer0();
 						StopCpuTimer1();
@@ -506,13 +487,13 @@ interrupt void sciaRxFifoIsr(void)
 				//启动停止流量控制
 				case 0xB3:
 					SWITCH_FLAG=0;
-					if(rdataA[2]==0xAA)//启动
+					if(testdata[2]==0xAA)//启动
 					{
-						flow_cmd = BUILD_UINT32(rdataA[5], rdataA[4], rdataA[3]);
+						flow_cmd = BUILD_UINT32(testdata[5], testdata[4], testdata[3]);
 						StopCpuTimer0();
 						StartCpuTimer1();	//开启定时器，开始进行PID控制
 					}
-					else if(rdataA[2]==0x55)//停止
+					else if(testdata[2]==0x55)//停止
 					{
 						StopCpuTimer0();
 						StopCpuTimer1();
@@ -521,18 +502,18 @@ interrupt void sciaRxFifoIsr(void)
 					break;
 				//压力PID参数修改
 				case 0xB5:
-					kp_pre=rdataA[3];
-					ki_pre=(float32)(rdataA[4]/1000);
-					kd_pre=rdataA[5];
+					kp_pre=testdata[3];
+					ki_pre=(float32)(testdata[4]/1000);
+					kd_pre=testdata[5];
 					SWITCH_FLAG=1;
 					PrePID.SetCmd=0xFFFFFF;
 					StartCpuTimer0();
 					break;
 				//流量PID参数修改
 				case 0xB6:
-					kp_flow=rdataA[3];
-					ki_flow=(float32)(rdataA[4]/1000);
-					kd_flow=rdataA[5];
+					kp_flow=testdata[3];
+					ki_flow=(float32)(testdata[4]/1000);
+					kd_flow=testdata[5];
 					SWITCH_FLAG=1;
 					flow_cmd=0xFFFFFF;
 					StartCpuTimer1();
@@ -570,7 +551,7 @@ interrupt void sciaRxFifoIsr(void)
 				}
 			}
 	}
-	//SendData(rdataA);
+	//SCIB_send_cmd(testdata);
 	//SciaRegs.SCIFFTX.bit.TXFFINTCLR=1;  // Clear Interrupt flag
 	SciaRegs.SCIFFRX.bit.RXFFOVRCLR=1;  // Clear Overflow flag
 	SciaRegs.SCIFFRX.bit.RXFFINTCLR=1; 	// Clear Interrupt flag
@@ -598,7 +579,7 @@ interrupt void scibTxFifoIsr(void)
 	unsigned char fifocnt;
 	for(fifocnt=0; fifocnt< 8; fifocnt++)
 	{
-		ScibRegs.SCITXBUF=sdataA[fifocnt];     // Send data
+		ScibRegs.SCITXBUF=sdataB[fifocnt];     // Send data
 	}
 	//SciaRegs.SCIFFTX.bit.TXFFINTCLR=1;  // 清此标志位表示中断可以产生
 	PieCtrlRegs.PIEACK.bit.ACK9=1;      // Issue PIE ACK
@@ -627,7 +608,7 @@ interrupt void scibRxFifoIsr(void)
 
 
     a=ScibRegs.SCIRXBUF.all;	 // Read data
-    Uart_Queue_pushAchar(&UART1_queue,a);
+    Uart_Queue_pushAchar(&UARTb_queue,a);
 
 
 	//ScibRegs.SCIFFTX.bit.TXFFINTCLR=1;  // Clear Interrupt flag
@@ -670,7 +651,7 @@ interrupt void scicTxFifoIsr(void)
 ** 输　入: 无
 ** 输　出 : 无
 ** 全局变量: PrePID，kd_tmp_pre，pre_cal，pre_32_out，CMD，pre_act_data
-** 调用模块: SendCmd，SendData
+** 调用模块: SendCmd，SCIB_send_cmd
 ** 状     态: 功能已完成，待调试
 ** 作　者: 潘俊威
 ** 日　期: 20151108
@@ -740,7 +721,7 @@ interrupt void ISRTimer0(void)
 		pre_change[5]=precmd_change[1];
 		pre_change[6]=XorCheckSum(pre_change, 6);
 		pre_change[7]=0x23;
-		SendData(pre_change);
+		SCIB_send_cmd(pre_change);
 
 		if(SWITCH_FLAG==1)
 		{
@@ -749,26 +730,26 @@ interrupt void ISRTimer0(void)
 				gStatus=0;
 		}
 	}
-	else//读取压力传感器的值
-	{
-#ifdef DEBUG
-		pre_cmd_data[3] = HI_UINT32(pre_cal[1]);
-		pre_cmd_data[4] = MI_UINT32(pre_cal[1]);
-		pre_cmd_data[5] = LO_UINT32(pre_cal[1]);
-		pre_cmd_data[6] = XorCheckSum(pre_cmd_data,6);
-		SendData(pre_cmd_data);//发送输出命令
-#endif
-		if(SWITCH_FLAG==0)
-			pre_act_data[1]=0xB2;
-		else
-			pre_act_data[1]=0xB7;
-		pre_act_data[3] = HI_UINT32(PrePID.Sensor);
-		pre_act_data[4] = MI_UINT32(PrePID.Sensor);
-		pre_act_data[5] = LO_UINT32(PrePID.Sensor);
-		pre_act_data[6] = XorCheckSum(pre_act_data,6);
-		SendData(pre_act_data);
-		//发送传感器读数
-	}
+//	else//读取压力传感器的值
+//	{
+//#ifdef DEBUG
+//		pre_cmd_data[3] = HI_UINT32(pre_cal[1]);
+//		pre_cmd_data[4] = MI_UINT32(pre_cal[1]);
+//		pre_cmd_data[5] = LO_UINT32(pre_cal[1]);
+//		pre_cmd_data[6] = XorCheckSum(pre_cmd_data,6);
+//		SCIB_send_cmd(pre_cmd_data);//发送输出命令
+//#endif
+//		if(SWITCH_FLAG==0)
+//			//pre_act_data[1]=0xB2;
+//		else
+//			//pre_act_data[1]=0xB7;
+//		//pre_act_data[3] = HI_UINT32(PrePID.Sensor);
+//		//pre_act_data[4] = MI_UINT32(PrePID.Sensor);
+//		//pre_act_data[5] = LO_UINT32(PrePID.Sensor);
+//		//pre_act_data[6] = XorCheckSum(pre_act_data,6);
+//		//SCIB_send_cmd(pre_act_data);
+//		//发送传感器读数
+//	}
 #ifdef DEBUG
 	LED1=~LED1;
 	//LED2=~LED2;
@@ -785,7 +766,7 @@ interrupt void ISRTimer0(void)
 ** 输　入: 无
 ** 输　出 : 无
 ** 全局变量: flow_out，err_flow，CMD，flow_act_data
-** 调用模块: SendCmd，SendData
+** 调用模块: SendCmd，SCIB_send_cmd
 ** 状     态: PID调节过程代码未进行修改，	此处流量输入框数值更新代码没有加上
 ** 作　者: 潘俊威
 ** 日　期: 20151108
@@ -826,20 +807,20 @@ interrupt void ISRTimer1(void)
 		CMD[11]=0;
 		SendCmd(CMD);//发送总命令
 	}
-	else//读取流量传感器的值
-	{
-		if(SWITCH_FLAG==0)
-			flow_act_data[1]=0xB4;
-		else
-			flow_act_data[1]=0xB8;
-		//发送传感器读数
-		flow_act_data[3] = HI_UINT32(flow_sensor);
-		flow_act_data[4] = MI_UINT32(flow_sensor);
-		flow_act_data[5] = LO_UINT32(flow_sensor);
-		flow_act_data[6] = XorCheckSum(flow_act_data,6);
-		SendData(flow_act_data);
-		//发送传感器读数
-	}
+//	else//读取流量传感器的值
+//	{
+//		if(SWITCH_FLAG==0)
+//			//flow_act_data[1]=0xB4;
+//		else
+//			//flow_act_data[1]=0xB8;
+//		//发送传感器读数
+//		//flow_act_data[3] = HI_UINT32(flow_sensor);
+//		//flow_act_data[4] = MI_UINT32(flow_sensor);
+//		//flow_act_data[5] = LO_UINT32(flow_sensor);
+//		//flow_act_data[6] = XorCheckSum(flow_act_data,6);
+//		//SCIB_send_cmd(flow_act_data);
+//		//发送传感器读数
+//	}
 #ifdef DEBUG
 	//LED1=~LED1;
 	//LED2=~LED2;
@@ -903,7 +884,7 @@ interrupt void ISRTimer2(void)
 		precmd_change[0]=MI_UINT32(ad[2]);//此处将电位器AD转换值保存到全局变量中去，并在定时器0中将此数发送到上位机，这里没有进行单位变换，保证了数据能够无损转换
 		precmd_change[1]=LO_UINT32(ad[2]);
 		//CMD_Change[6]=XorCheckSum(CMD_Change, 6);
-		//SendData(CMD_Change);
+		//SCIB_send_cmd(CMD_Change);
 	}
 	if(abs(Flow_AD_Old-ad[3])>5)//the num of 300 needs to be determined
 	{
@@ -912,7 +893,7 @@ interrupt void ISRTimer2(void)
 		//CMD_Change[4]=MI_UINT32(ad[2]);
 		//CMD_Change[5]=LO_UINT32(ad[2]);
 		//CMD_Change[6]=XorCheckSum(CMD_Change, 6);
-		//SendData(CMD_Change);
+		//SCIB_send_cmd(CMD_Change);
 	}
 	Pre_AD_Old = ad[2];
 	Flow_AD_Old = ad[3];
@@ -1018,13 +999,13 @@ void CfgLed(void)
 /*
  * 此段为自定义段
  */
-//串口A发送函数
-void SendData(unsigned char *buf)
+//串口B发送函数
+void SCIB_send_cmd(unsigned char *buf)
 {
 	unsigned char i;
-	for(i=0;i<8;i++)
+	for(i=1;i<7;i++)
 	{
-		sdataA[i]=(*(buf++));
+		sdataB[i]=(*(buf++));
 	}
 	//SciaRegs.SCIFFTX.bit.TXFFINTCLR=1;  // Clear Interrupt flag
 	ScibRegs.SCIFFTX.bit.TXFFINTCLR=1;  // Clear Interrupt flag

@@ -3,8 +3,8 @@
 
 #define QUEUE_MAX_SIZE 200//串口接收缓存长度
 #define CMD_MAX_BUFFER 30//一条指令的最大长度
-#define _UART1 0x01  //因为STM32原来的程序里定义过USART，为了避免重定义，所以前后加横杠
-#define _UART2 0x02  //
+#define _UARTa 0x01  //因为STM32原来的程序里定义过USART，为了避免重定义，所以前后加横杠
+#define _UARTb 0x02  //
 #define WAIT_FRAME1  0
 #define WAIT_OVER    1
 #define WAIT_DATA    2
@@ -25,10 +25,10 @@ typedef struct _SERIALCMD
     unsigned char  cmd_buffer_T[CMD_MAX_BUFFER];//串口指令发送数组
 } SERIALCMD;//串口指令结构体
 
-extern QUEUE UART1_queue;    //声明串口1队列
-extern QUEUE UART2_queue;    //声明串口1队列
-extern SERIALCMD UART1_cmd ;//声明串口1的指令结构体
-extern SERIALCMD UART2_cmd ;//声明串口1的指令结构体
+extern QUEUE UARTa_queue;    //声明串口1队列
+extern QUEUE UARTb_queue;    //声明串口1队列
+extern SERIALCMD UARTa_cmd ;//声明串口1的指令结构体
+extern SERIALCMD UARTb_cmd ;//声明串口1的指令结构体
 
 void Uart_Queue_Init(QUEUE *UARTX_queue);
 void Uart_Queue_pushAchar(QUEUE *UARTX_queue,unsigned char data);

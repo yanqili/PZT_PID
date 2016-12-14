@@ -2,10 +2,10 @@
 #include "DSP2833x_Examples.h"   // DSP2833x Examples Include File
 #include "SCI_queue.h"
 
-QUEUE UART1_queue = {0,0,0}; //定义串口1队列
-QUEUE UART2_queue = {0,0,0}; //定义串口1队列
-SERIALCMD UART1_cmd = {0,0,0,0};//定义串口1的指令结构体
-SERIALCMD UART2_cmd = {0,0,0,0};//定义串口1的指令结构体
+QUEUE UARTa_queue = {0,0,0}; //定义串口1队列
+QUEUE UARTb_queue = {0,0,0}; //定义串口1队列
+SERIALCMD UARTa_cmd = {0,0,0,0};//定义串口1的指令结构体
+SERIALCMD UARTb_cmd = {0,0,0,0};//定义串口1的指令结构体
 
 /********************************
 *名    称： Uart＿Queue_Init
