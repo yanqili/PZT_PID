@@ -40,7 +40,7 @@ void SendCmd(unsigned char *buf);
 void CfgScia(void);
 void CfgScib(void);
 void CfgScic(void);
-void CfgCap(void);
+//void CfgCap(void);
 void CfgTimer0(void);
 void CfgTimer1(void);
 void CfgTimer2(void);
@@ -57,8 +57,8 @@ interrupt void sciaRxFifoIsr(void);
 interrupt void scicTxFifoIsr(void);
 interrupt void scibTxFifoIsr(void);
 interrupt void scibRxFifoIsr(void);
-interrupt void ISRCap1(void);
-interrupt void ISRCap2(void);
+//interrupt void ISRCap1(void);
+//interrupt void ISRCap2(void);
 interrupt void ISRTimer0(void);
 interrupt void ISRTimer1(void);
 interrupt void ISRTimer2(void);
@@ -154,8 +154,8 @@ void main(void)
    PieVectTable.SCITXINTC = &scicTxFifoIsr;
    PieVectTable.SCIRXINTB = &scibRxFifoIsr;
    PieVectTable.SCITXINTB = &scibTxFifoIsr;
-   PieVectTable.ECAP1_INT = &ISRCap1;
-   PieVectTable.ECAP2_INT = &ISRCap2;
+   //PieVectTable.ECAP1_INT = &ISRCap1;
+   //PieVectTable.ECAP2_INT = &ISRCap2;
    PieVectTable.TINT0 = &ISRTimer0;
    PieVectTable.XINT13 = &ISRTimer1;
    PieVectTable.TINT2 = &ISRTimer2;
@@ -165,7 +165,7 @@ void main(void)
    InitCpuTimers();//初始化定时器
    InitSci();  // Initalize SCI
    ADInit();	//Initalize AD7606
-   InitCapl();
+   //InitCapl();
    spi_init();
    spi_fifo_init();
 
@@ -215,7 +215,10 @@ void main(void)
 		   SWITCH_FLAG=0;
 		   gStatus=0;
 	   }
-
+       LED1=~LED1;
+       DELAY_US(50000);
+       LED3=~LED3;
+       DELAY_US(50000);
 #ifdef DEBUG
 	   if(rdataA[0]==0x5A)
 	   {
@@ -647,70 +650,6 @@ interrupt void scicTxFifoIsr(void)
 	PieCtrlRegs.PIEACK.bit.ACK8=1;      // Issue PIE ACK
 }
 
-/*********************************************************************************************************
-** 函数名称: ISRCap1
-** 功能描述: eCap中断处理函数，用于压力传感器数据采集
-** 输　入: 无
-** 输　出 : 无
-** 全局变量:pre_sensor
-** 调用模块:
-** 状     态: 功能已完成，待调试
-** 作　者: 潘俊威
-** 日　期: 20151108
-**-------------------------------------------------------------------------------------------------------
-** 修改人:
-** 日　期:
-**-------------------------------------------------------------------------------------------------------
-********************************************************************************************************/
-interrupt void ISRCap1(void)
-{
-	Uint32 t1=0,t2=0,t3=0,t4=0;
-	int32	pre_freq;
-	//float32 tmp;
-   // Acknowledge this interrupt to receive more interrupts from group 1
-    PieCtrlRegs.PIEACK.all = PIEACK_GROUP4;
-    ECap1Regs.ECCLR.all=0xFFFF;//clare all flag
-	t1= ECap1Regs.CAP1;
-	t2= ECap1Regs.CAP2;
-	t3= ECap1Regs.CAP3;
-  	t4= ECap1Regs.CAP4;
-    T1=t2-t1;T2=t4-t3;
-    pre_freq = (int32)((float32)(CPU_CLK/T1)*10);//精确到0.1Hz
-    //tmp = ((float32)(pre_sensor-10000)/40000);
-    //pre_sensor = (int32)(((float32)(pre_freq-10000)/40000)*(float32)CMD_SCALE) + CMD_ZERO;
-    PrePID.Sensor = (int32)(((float32)(pre_freq-10000)/40000)*CMD_SCALE) + CMD_ZERO;
-}
-
-/*********************************************************************************************************
-** 函数名称: ISRCap2
-** 功能描述: eCap中断处理函数，用于流量传感器数据采集
-** 输　入: 无
-** 输　出 : 无
-** 全局变量:flow_sensor
-** 调用模块:
-** 状     态: 功能已完成，待调试
-** 作　者: 潘俊威
-** 日　期: 20151108
-**-------------------------------------------------------------------------------------------------------
-** 修改人:
-** 日　期:
-**-------------------------------------------------------------------------------------------------------
-********************************************************************************************************/
-interrupt void ISRCap2(void)
-{
-	Uint32 t5,t6,t7,t8;
-	int32 flow_freq;
-   // Acknowledge this interrupt to receive more interrupts from group 1
-    PieCtrlRegs.PIEACK.all = PIEACK_GROUP4;
-    ECap2Regs.ECCLR.all=0xFFFF;//clear all flag
-	t5= ECap2Regs.CAP1;
-	t6= ECap2Regs.CAP2;
-	t7= ECap2Regs.CAP3;
-  	t8= ECap2Regs.CAP4;
-    T3=t6-t5;T4=t8-t7;
-    flow_freq = (int32)((float32)(CPU_CLK/T3)*10);//精确到0.1Hz,这个精确到0.1Hz还是1Hz需要和那边确认
-    flow_sensor = (int32)(((float32)(flow_freq-150000)/350000)*CMD_SCALE) + CMD_ZERO;//流量传感器输出频率范围15~50KHz
-}
 
 /*********************************************************************************************************
 ** 函数名称: ISRTimer0
@@ -987,7 +926,7 @@ void INTConfig(void)
 	CfgScia();//接收指令在这个中断函数里
 	CfgScib();
 	CfgScic();//向下位机发送命令在这个中断函数里
-	CfgCap();//传感器数据采集在这个中断函数里
+	//CfgCap();//传感器数据采集在这个中断函数里
 }
 
 //中断线的配置函数
@@ -1017,14 +956,7 @@ void CfgScic(void)
 	EINT;
 }
 
-void CfgCap(void)
-{
-	DINT;
-	PieCtrlRegs.PIEIER4.bit.INTx1 = 1;
-	PieCtrlRegs.PIEIER4.bit.INTx2 = 1;
-	IER |= M_INT4;
-	EINT;
-}
+
 
 void CfgTimer0(void)
 {
