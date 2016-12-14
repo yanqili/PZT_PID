@@ -1,0 +1,19 @@
+/.launches/
+/.settings/
+/CMD/
+/Debug/
+/SCI.CS_/
+
+
+# ASM files
+*.asm
+
+# other files
+*.ccsproject
+*.cproject
+*.project
+*.log
+*.lkf
+*.paf2
+*.pjt
+*.sbl
