@@ -602,10 +602,15 @@ interrupt void scibRxFifoIsr(void)
 	unsigned char fifocnt;
     DINT;//¹Ø×ÜÖÐ¶Ï
 
-	for(fifocnt=0;fifocnt<8;fifocnt++)
-	{
-	   rdataA[fifocnt]=ScibRegs.SCIRXBUF.all;	 // Read data
-	}
+
+    rdataA[0]=ScibRegs.SCIRXBUF.all;	 // Read data
+    rdataA[1]= 0x01;
+    rdataA[2]= 0x02;
+    rdataA[3]= 0x03;
+    rdataA[4]= 0x04;
+    rdataA[5]= 0x05;
+    rdataA[6]= 0x06;
+    rdataA[7]= 0x07;
 
 
 	SendData(rdataA);
