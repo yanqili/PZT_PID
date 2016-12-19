@@ -28,7 +28,7 @@
 #define	BUILD_UINT32(loByte, miByte, hiByte)	\
 	((Uint32)(((Uint32)(loByte) & 0x000000FF) + (((Uint32)(miByte) & 0x000000FF) << 8) +(((Uint32)(hiByte) & 0x000000FF) << 16)))
 #define BUILD_UINT16(loByte, hiByte) \
-          ((uint16)(((loByte) & 0x00FF) + (((hiByte) & 0x00FF) << 8)))
+          ((Uint16)(((loByte) & 0x00FF) + (((hiByte) & 0x00FF) << 8)))
 #define HI_UINT32(a) (((a) >> 16) & 0xFF)
 #define MI_UINT32(a) (((a) >> 8) & 0xFF)
 #define LO_UINT32(a) ((a) & 0xFF)
@@ -92,6 +92,7 @@ int32 kd_tmp_pre, kd_tmp_flow;
 //AD\DA
 Uint16 ad[4];
 int	gStatus;
+int i;
 unsigned char precmd_change[2];//测试，用于保存电位器旋钮的改变值
 
 
@@ -99,10 +100,10 @@ struct	pid{
 	int32	SetCmd;//定义设定值
 	//int32	OutCmd;//实际输出值
 	int32	Sensor;//传感器反馈
-	int32 	err;	//定义偏差值
-	int32 	err_next;//定义上一个偏差值
-	int32 	err_last;//定义最上面的偏差值
-	int32	integral;//梯形积分所用参数
+	int16 	err;	//定义偏差值
+	int16 	err_next;//定义上一个偏差值
+	int16 	err_last;//定义最上面的偏差值
+	int16	integral;//梯形积分所用参数
 	float32 Kp,Ki,Kd;//定义比例、积分、微分系数
 }PrePID, FlowPID;
 
@@ -224,19 +225,83 @@ void main(void)
        if(Uart_Queue_getAcmd(&UARTb_cmd,&UARTb_queue))
        {
 
-    	   if(UARTb_cmd.cmd_buffer_R[0]==0xB1)
+    	   if(UARTb_cmd.cmd_buffer_R[0]==0xB1) //压力启动\停止
             {
-            	   dataB[0]=0xB1;
-            	   dataB[1]=0xAA;
-            	   dataB[2]=0x00;
-            	   dataB[3]=0x00;
-            	   dataB[4]=0x00;
-            	   dataB[5]=0x00;
+               switch(UARTb_cmd.cmd_buffer_R[1])
+               {
+                    case 0xAA:  //启动
 
-            	   SCIB_send_cmd(dataB);
+                    	PrePID.SetCmd = BUILD_UINT32(UARTb_cmd.cmd_buffer_R[4],UARTb_cmd.cmd_buffer_R[3], UARTb_cmd.cmd_buffer_R[2]);
+
+                        	dataB[0]=0xB2;
+							dataB[1]=0xFF;
+							dataB[2]=HI_UINT32(PrePID.SetCmd);
+							dataB[3]=MI_UINT32(PrePID.SetCmd);
+							dataB[4]=LO_UINT32(PrePID.SetCmd);
+							dataB[5]=0x00;
+							for(i=0;i<100;i++)
+							{
+								SCIB_send_cmd(dataB);
+							}
+
+
+
+                    break;
+
+                    case 0x55:  //停止
+
+							dataB[0]=0xB2;
+							dataB[1]=0xFF;
+							dataB[2]=0x0F;
+							dataB[3]=0xFF;
+							dataB[4]=0x00;
+							dataB[5]=0x00;
+							for(i=0;i<100;i++)
+							{
+							   SCIB_send_cmd(dataB);
+							}
+
+
+                    break;
+
+               }
+
 
             }
+    	   if(UARTb_cmd.cmd_buffer_R[0]==0xB5) //压力PID参数调节
+    	   {
+    		   switch(UARTb_cmd.cmd_buffer_R[1])
+    		   {
+    		         case 0xAA:  //PID参数设置+阶跃测试
 
+    		        	 break;
+    		         case 0x55:  //PID参数设置
+
+						 PrePID.Kp = UARTb_cmd.cmd_buffer_R[2];
+						 PrePID.Ki = UARTb_cmd.cmd_buffer_R[3];
+						 PrePID.Kd = UARTb_cmd.cmd_buffer_R[4];
+
+							 dataB[0]=0xB2;
+							 dataB[1]=0xFF;
+							 dataB[2]=PrePID.Kp;
+							 dataB[3]=PrePID.Ki;
+							 dataB[4]=PrePID.Kd;
+							 dataB[5]=0xFF;
+							 for(i=0;i<100;i++)
+							 {
+								 SCIB_send_cmd(dataB);
+							 }
+
+
+
+    		        	 break;
+
+
+    		   }
+
+
+
+    	   }
        }
 #ifdef DEBUG
 	   if(testdata[0]==0x5A)
@@ -1007,6 +1072,8 @@ void SCIB_send_cmd(unsigned char *buf)
 	{
 		sdataB[i]=(*(buf++));
 	}
+	while(ScibRegs.SCIFFTX.bit.TXFFST!=0)
+	{}
 	//SciaRegs.SCIFFTX.bit.TXFFINTCLR=1;  // Clear Interrupt flag
 	ScibRegs.SCIFFTX.bit.TXFFINTCLR=1;  // Clear Interrupt flag
 }
