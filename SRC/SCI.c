@@ -248,9 +248,9 @@ void main(void)
 
                     	PrePID.SetCmd = BUILD_UINT32(UARTb_cmd.cmd_buffer_R[4],UARTb_cmd.cmd_buffer_R[3], UARTb_cmd.cmd_buffer_R[2]);
                     	StartCpuTimer0();
-                    	        CMD[3]=0xFF;//添加CMD赋值代码
-                    			CMD[4]=0xFF;
-                    			CMD[5]=0xFF;
+                    	        CMD[3]=0x00;//添加CMD赋值代码
+                    			CMD[4]=0x00;
+                    			CMD[5]=0x00;
                     			CMD[6]=0;//close Channel 2 MAX
                     			CMD[7]=0;
                     			CMD[8]=0;
@@ -295,6 +295,10 @@ void main(void)
 						 PrePID.Ki = UARTb_cmd.cmd_buffer_R[3];
 						 PrePID.Kd = UARTb_cmd.cmd_buffer_R[4];
 					//下面是临时测试驱动电源代码
+						if(PrePID.Kp>100)  //降额实验，不大于100V
+						{
+							PrePID.Kp = 100;
+						}
 						pre_cmd = Vto3ByteCMD(PrePID.Kp);
 						CMD[3]=HI_UINT32(pre_cmd);//添加CMD赋值代码
 						CMD[4]=MI_UINT32(pre_cmd);
@@ -805,17 +809,7 @@ interrupt void ISRTimer0(void)
 //		pre_out[1] = MI_UINT32(pre_32_out);
 //		pre_out[2] = LO_UINT32(pre_32_out);
 		//添加CMD赋值代码
-		pre_cmd = Vto3ByteCMD(10);
-		CMD[3]=HI_UINT32(pre_cmd);//添加CMD赋值代码
-		CMD[4]=MI_UINT32(pre_cmd);
-		CMD[5]=LO_UINT32(pre_cmd);
-		CMD[6]=0;//close Channel 2 MAX
-		CMD[7]=0;
-		CMD[8]=0;
-		CMD[9]=0;//Close Channel 3
-		CMD[10]=0;
-		CMD[11]=0;
-		SCIC_send_cmd(CMD);
+
 		//下面的代码目的是更新上位机命令输入框的值
 		pre_change[0]=0x5A;
 		pre_change[1]=0xC2;
@@ -1153,7 +1147,7 @@ int32 Vto3ByteCMD(int V)
 {
 
 	int32 b;
-	b = V/210.0*pow(2.0,24);
+	b = (V+10)/210.0*pow(2.0,24);
 
 	return b;
 
