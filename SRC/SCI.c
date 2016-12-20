@@ -1,6 +1,7 @@
 #include "DSP2833x_Device.h"     // DSP2833x Headerfile Include File
 #include "DSP2833x_Examples.h"   // DSP2833x Examples Include File
 #include "SCI_queue.h"
+#include "math.h"
 
 //宏定义
 //#define DEBUG
@@ -17,7 +18,7 @@
 #define	LED2			GpioDataRegs.GPADAT.bit.GPIO1
 #define	LED3			GpioDataRegs.GPADAT.bit.GPIO2
 #define	LED4			GpioDataRegs.GPADAT.bit.GPIO3
-#define	PRESAMP			GpioDataRegs.GPADAT.bit.GPIO4
+#define	PID_start			GpioDataRegs.GPADAT.bit.GPIO4
 #define FLOSAMP			GpioDataRegs.GPADAT.bit.GPIO6
 #define CMD_ZERO		(int32)0x1745D1
 #define CMD_SCALE		(float32)(0xFFFFFF/11)*10
@@ -37,7 +38,7 @@
 void INTConfig(void);
 void InitXintf(void);
 void SCIB_send_cmd(unsigned char *buf);
-void SendCmd(unsigned char *buf);
+void SCIC_send_cmd(unsigned char *buf);
 void CfgScia(void);
 void CfgScib(void);
 void CfgScic(void);
@@ -52,6 +53,7 @@ void spi_xmit(Uint16 a);	//DA Ouptput Function, you can directly use it without 
 void spi_fifo_init(void);
 void spi_init(void);
 unsigned char XorCheckSum(unsigned char * pBuf, char len);
+int32 Vto3ByteCMD(int V);
 
 interrupt void sciaTxFifoIsr(void);
 interrupt void sciaRxFifoIsr(void);
@@ -76,7 +78,7 @@ int32 pre_cmd=0;	//命令压力
 int32 flow_cmd=0;	//命令流量
 unsigned char pre_out[3]={0};	//压力输出
 unsigned char flow_out[3]={0};	//流量输出
-unsigned char CMD[12];	//总命令输出
+unsigned char CMD[12];	//压电陶瓷驱动电源指令输出  0xAA 0xBB .....
 Uint32 T1=0,T2=0,T3=0,T4=0;
 int32 pre_sensor=0, flow_sensor=0;
 
@@ -97,9 +99,10 @@ unsigned char precmd_change[2];//测试，用于保存电位器旋钮的改变值
 
 
 struct	pid{
-	int32	SetCmd;//定义设定值
+	int32	SetCmd;//定义设定值 单位：Pa
 	//int32	OutCmd;//实际输出值
-	int32	Sensor;//传感器反馈
+	int32	Sensor;//传感器反馈  单位：Pa
+	int32   Sensor_code; //传感器反馈  AD转换得到的16位数
 	int16 	err;	//定义偏差值
 	int16 	err_next;//定义上一个偏差值
 	int16 	err_last;//定义最上面的偏差值
@@ -179,9 +182,10 @@ void main(void)
    DELAY_US(100000);
    CLR_ADRST;
 
-   ConfigCpuTimer(&CpuTimer0, 150, 7500);
-   ConfigCpuTimer(&CpuTimer1, 150, 5000);
-   ConfigCpuTimer(&CpuTimer2, 150, 50000);
+   //t = Freq*Period/150000000
+   ConfigCpuTimer(&CpuTimer0, 150, 20000);  //20ms
+   ConfigCpuTimer(&CpuTimer1, 150, 5000); // 5ms
+   ConfigCpuTimer(&CpuTimer2, 150, 5000); //5ms
    StartCpuTimer2();
 
    StopCpuTimer0();
@@ -189,7 +193,7 @@ void main(void)
    //StopCpuTimer2();
 
 #ifdef DEBUG
-   PRESAMP=1;
+   PID_start=1;
    DELAY_US(10);
    FLOSAMP=1;
    DELAY_US(10);
@@ -210,18 +214,29 @@ void main(void)
    testdata[5]=0x01;
 
    SCIB_send_cmd(testdata);
+   CMD[3]=0x00;//添加CMD赋值代码
+   		CMD[4]=0x00;
+   		CMD[5]=0x00;
+   		CMD[6]=0;//close Channel 2 MAX
+   		CMD[7]=0;
+   		CMD[8]=0;
+   		CMD[9]=0;//Close Channel 3
+   		CMD[10]=0;
+   		CMD[11]=0;
+   		SCIC_send_cmd(CMD);
    while(1)
    {
-	   if(gStatus==100)
-	   {
-		   StopCpuTimer0();
-		   SWITCH_FLAG=0;
-		   gStatus=0;
-	   }
+//	   if(gStatus==100)
+//	   {
+//		   StopCpuTimer0();
+//		   SWITCH_FLAG=0;
+//		   gStatus=0;
+//	   }
        LED1=~LED1;
        DELAY_US(50000);
        LED3=~LED3;
        DELAY_US(50000);
+
        if(Uart_Queue_getAcmd(&UARTb_cmd,&UARTb_queue))
        {
 
@@ -232,34 +247,33 @@ void main(void)
                     case 0xAA:  //启动
 
                     	PrePID.SetCmd = BUILD_UINT32(UARTb_cmd.cmd_buffer_R[4],UARTb_cmd.cmd_buffer_R[3], UARTb_cmd.cmd_buffer_R[2]);
-
-                        	dataB[0]=0xB2;
-							dataB[1]=0xFF;
-							dataB[2]=HI_UINT32(PrePID.SetCmd);
-							dataB[3]=MI_UINT32(PrePID.SetCmd);
-							dataB[4]=LO_UINT32(PrePID.SetCmd);
-							dataB[5]=0x00;
-							for(i=0;i<100;i++)
-							{
-								SCIB_send_cmd(dataB);
-							}
+                    	StartCpuTimer0();
+                    	        CMD[3]=0xFF;//添加CMD赋值代码
+                    			CMD[4]=0xFF;
+                    			CMD[5]=0xFF;
+                    			CMD[6]=0;//close Channel 2 MAX
+                    			CMD[7]=0;
+                    			CMD[8]=0;
+                    			CMD[9]=0;//Close Channel 3
+                    			CMD[10]=0;
+                    			CMD[11]=0;
+                    			SCIC_send_cmd(CMD);
 
 
 
                     break;
 
                     case 0x55:  //停止
-
+                    	StopCpuTimer0();
 							dataB[0]=0xB2;
 							dataB[1]=0xFF;
 							dataB[2]=0x0F;
 							dataB[3]=0xFF;
 							dataB[4]=0x00;
 							dataB[5]=0x00;
-							for(i=0;i<100;i++)
-							{
-							   SCIB_send_cmd(dataB);
-							}
+
+							SCIB_send_cmd(dataB);
+
 
 
                     break;
@@ -280,7 +294,18 @@ void main(void)
 						 PrePID.Kp = UARTb_cmd.cmd_buffer_R[2];
 						 PrePID.Ki = UARTb_cmd.cmd_buffer_R[3];
 						 PrePID.Kd = UARTb_cmd.cmd_buffer_R[4];
-
+					//下面是临时测试驱动电源代码
+						pre_cmd = Vto3ByteCMD(PrePID.Kp);
+						CMD[3]=HI_UINT32(pre_cmd);//添加CMD赋值代码
+						CMD[4]=MI_UINT32(pre_cmd);
+						CMD[5]=LO_UINT32(pre_cmd);
+						CMD[6]=0;//close Channel 2 MAX
+						CMD[7]=0;
+						CMD[8]=0;
+						CMD[9]=0;//Close Channel 3
+						CMD[10]=0;
+						CMD[11]=0;
+						SCIC_send_cmd(CMD);
 							 dataB[0]=0xB2;
 							 dataB[1]=0xFF;
 							 dataB[2]=PrePID.Kp;
@@ -312,7 +337,7 @@ void main(void)
 	   else
 	   {
 		   //INTConfig();
-		   SendCmd(tst);
+		   SCIC_send_cmd(tst);
 	   }
 	   //SciaRegs.SCIFFTX.bit.TXFFINT=1;
 	   //SCIB_send_cmd(tst);
@@ -334,6 +359,7 @@ void InitParameter(void)
 	PrePID.Kd = 0.2;
 	PrePID.SetCmd = 0;
 	PrePID.Sensor = 0;
+	PrePID.Sensor_code=0;
 	PrePID.err = 0;
 	PrePID.err_last = 0;
 	PrePID.err_next = 0;
@@ -348,6 +374,7 @@ void InitParameter(void)
 	FlowPID.Kd = 0.2;
 	FlowPID.SetCmd = 0;
 	FlowPID.Sensor = 0;
+	FlowPID.Sensor_code=0;
 	FlowPID.err = 0;
 	FlowPID.err_last = 0;
 	FlowPID.err_next = 0;
@@ -546,7 +573,7 @@ interrupt void sciaRxFifoIsr(void)
 					{
 						StopCpuTimer0();
 						StopCpuTimer1();
-						//SendCmd(tst);
+						//SCIC_send_cmd(tst);
 					}
 					break;
 				//启动停止流量控制
@@ -562,7 +589,7 @@ interrupt void sciaRxFifoIsr(void)
 					{
 						StopCpuTimer0();
 						StopCpuTimer1();
-						//SendCmd(tst);
+						//SCIC_send_cmd(tst);
 					}
 					break;
 				//压力PID参数修改
@@ -604,7 +631,7 @@ interrupt void sciaRxFifoIsr(void)
 					CMD[9]=0;//Close Channel 3
 					CMD[10]=0;
 					CMD[11]=0;
-					SendCmd(CMD);
+					SCIC_send_cmd(CMD);
 					break;
 				//进入PID调节界面
 				case 0xC1:
@@ -716,7 +743,7 @@ interrupt void scicTxFifoIsr(void)
 ** 输　入: 无
 ** 输　出 : 无
 ** 全局变量: PrePID，kd_tmp_pre，pre_cal，pre_32_out，CMD，pre_act_data
-** 调用模块: SendCmd，SCIB_send_cmd
+** 调用模块: SCIC_send_cmd，SCIB_send_cmd
 ** 状     态: 功能已完成，待调试
 ** 作　者: 潘俊威
 ** 日　期: 20151108
@@ -729,54 +756,66 @@ interrupt void ISRTimer0(void)
 {
 	char index;
 	unsigned char pre_change[8];
+	PID_start=1;
 	DINT;
 	PieCtrlRegs.PIEACK.all = PIEACK_GROUP1;
 	CpuTimer0Regs.TCR.bit.TIF=1;	//定时器到指定时间，置标志位
 	CpuTimer0Regs.TCR.bit.TRB=1;	//重载Timer0的定时数据
 
-	if(PRESAMP==0)//执行压力PID过程
-	{
-		PrePID.err = PrePID.SetCmd - PrePID.Sensor;//此时的pre_sensor已经转换成和0xFFFFFF一样的单位
-		//积分分离的算法，变积分PID在积分分离算法中实现
-		if(abs(PrePID.err)>INTE_SEP)//INTE_SEP根据实际情况决定
-			index = 0;
-		else
-		{
-			index = 1;
-			PrePID.integral += PrePID.err;//梯形积分提高稳态误差精度
-		}
-		kd_tmp_pre = (PrePID.err-2*PrePID.err_next+PrePID.err_last);
-		pre_cal[1] = PrePID.Kp*(PrePID.err-PrePID.err_next)+index*PrePID.Ki*PrePID.integral/2+PrePID.Kd*kd_tmp_pre+pre_cal[0];
-		pre_cal[0]=pre_cal[1];
-		//pre_32_out = pre_cmd+pre_cal[1];
-		pre_32_out = pre_32_out+pre_cal[1];//计算的pre_cal[1]对应的是本次执行的控制增量，因此输出需要加上上次的输出值。
-		//此处加判断，进行抗积分饱和过程
-		if(pre_32_out>PREUMAX)
-		{
-			pre_32_out = 0xFFFFFF;
-		}
-		else if(pre_32_out<PREUMIN)
-		{
-			pre_32_out = 0;
-		}
-		//下一步实现变积分PID
-		PrePID.err_last = PrePID.err_next;
-		PrePID.err_next = PrePID.err;
+	dataB[0]=0xB2;
+	dataB[1]=0xFF;
+	dataB[2]=MI_UINT32(PrePID.Sensor_code);
+	dataB[3]=LO_UINT32(PrePID.Sensor_code);
+	dataB[4]=0xFF;
+	dataB[5]=0x00;
 
-		pre_out[0] = HI_UINT32(pre_32_out);
-		pre_out[1] = MI_UINT32(pre_32_out);
-		pre_out[2] = LO_UINT32(pre_32_out);
+    SCIB_send_cmd(dataB);
+
+
+	if(PID_start==1)//执行压力PID过程
+	{
+//		PrePID.err = PrePID.SetCmd - PrePID.Sensor;//此时的pre_sensor已经转换成和0xFFFFFF一样的单位
+//		//积分分离的算法，变积分PID在积分分离算法中实现
+//		if(abs(PrePID.err)>INTE_SEP)//INTE_SEP根据实际情况决定
+//			index = 0;
+//		else
+//		{
+//			index = 1;
+//			PrePID.integral += PrePID.err;//梯形积分提高稳态误差精度
+//		}
+//		kd_tmp_pre = (PrePID.err-2*PrePID.err_next+PrePID.err_last);
+//		pre_cal[1] = PrePID.Kp*(PrePID.err-PrePID.err_next)+index*PrePID.Ki*PrePID.integral/2+PrePID.Kd*kd_tmp_pre+pre_cal[0];
+//		pre_cal[0]=pre_cal[1];
+//		//pre_32_out = pre_cmd+pre_cal[1];
+//		pre_32_out = pre_32_out+pre_cal[1];//计算的pre_cal[1]对应的是本次执行的控制增量，因此输出需要加上上次的输出值。
+//		//此处加判断，进行抗积分饱和过程
+//		if(pre_32_out>PREUMAX)
+//		{
+//			pre_32_out = 0xFFFFFF;
+//		}
+//		else if(pre_32_out<PREUMIN)
+//		{
+//			pre_32_out = 0;
+//		}
+//		//下一步实现变积分PID
+//		PrePID.err_last = PrePID.err_next;
+//		PrePID.err_next = PrePID.err;
+//
+//		pre_out[0] = HI_UINT32(pre_32_out);
+//		pre_out[1] = MI_UINT32(pre_32_out);
+//		pre_out[2] = LO_UINT32(pre_32_out);
 		//添加CMD赋值代码
-		CMD[3]=pre_out[0];//添加CMD赋值代码
-		CMD[4]=pre_out[1];
-		CMD[5]=pre_out[2];
-		CMD[6]=0xFF;//Open Channel 2 MAX
-		CMD[7]=0xFF;
-		CMD[8]=0xFF;
+		pre_cmd = Vto3ByteCMD(10);
+		CMD[3]=HI_UINT32(pre_cmd);//添加CMD赋值代码
+		CMD[4]=MI_UINT32(pre_cmd);
+		CMD[5]=LO_UINT32(pre_cmd);
+		CMD[6]=0;//close Channel 2 MAX
+		CMD[7]=0;
+		CMD[8]=0;
 		CMD[9]=0;//Close Channel 3
 		CMD[10]=0;
 		CMD[11]=0;
-		SendCmd(CMD);
+		SCIC_send_cmd(CMD);
 		//下面的代码目的是更新上位机命令输入框的值
 		pre_change[0]=0x5A;
 		pre_change[1]=0xC2;
@@ -786,7 +825,7 @@ interrupt void ISRTimer0(void)
 		pre_change[5]=precmd_change[1];
 		pre_change[6]=XorCheckSum(pre_change, 6);
 		pre_change[7]=0x23;
-		SCIB_send_cmd(pre_change);
+		//SCIB_send_cmd(pre_change);
 
 		if(SWITCH_FLAG==1)
 		{
@@ -821,7 +860,7 @@ interrupt void ISRTimer0(void)
 	//LED3=~LED3;
 	//LED4=~LED4;
 #endif
-	PRESAMP=~PRESAMP;
+	//PID_start=~PID_start;
 	EINT;
 }
 
@@ -831,7 +870,7 @@ interrupt void ISRTimer0(void)
 ** 输　入: 无
 ** 输　出 : 无
 ** 全局变量: flow_out，err_flow，CMD，flow_act_data
-** 调用模块: SendCmd，SCIB_send_cmd
+** 调用模块: SCIC_send_cmd，SCIB_send_cmd
 ** 状     态: PID调节过程代码未进行修改，	此处流量输入框数值更新代码没有加上
 ** 作　者: 潘俊威
 ** 日　期: 20151108
@@ -870,7 +909,7 @@ interrupt void ISRTimer1(void)
 		CMD[9]=0;//Close Channel 3
 		CMD[10]=0;
 		CMD[11]=0;
-		SendCmd(CMD);//发送总命令
+		SCIC_send_cmd(CMD);//发送总命令
 	}
 //	else//读取流量传感器的值
 //	{
@@ -941,16 +980,16 @@ interrupt void ISRTimer2(void)
 		ad[2]=0;
 	if(ad[3]>50000)
 		ad[3]=0;
-	if(abs(Pre_AD_Old-ad[2])>5)
-	{
-		PrePID.SetCmd=(int)((double)(ad[2]/32768.0)*15252010)+1525201;//在此处将压力命令值修改，触发条件为旋钮旋转
+
+		PrePID.Sensor_code=ad[2];//保存反馈的最原始的压力数据
+		PrePID.Sensor=ad[2]/32768.0*2500000;
 		//CMD_Change[2]=0xAA;
 		//CMD_Change[3]=0;
-		precmd_change[0]=MI_UINT32(ad[2]);//此处将电位器AD转换值保存到全局变量中去，并在定时器0中将此数发送到上位机，这里没有进行单位变换，保证了数据能够无损转换
-		precmd_change[1]=LO_UINT32(ad[2]);
+		//precmd_change[0]=MI_UINT32(ad[2]);//此处将电位器AD转换值保存到全局变量中去，并在定时器0中将此数发送到上位机，这里没有进行单位变换，保证了数据能够无损转换
+		//precmd_change[1]=LO_UINT32(ad[2]);
 		//CMD_Change[6]=XorCheckSum(CMD_Change, 6);
 		//SCIB_send_cmd(CMD_Change);
-	}
+
 	if(abs(Flow_AD_Old-ad[3])>5)//the num of 300 needs to be determined
 	{
 		//CMD_Change[2]=0xAA;
@@ -1075,17 +1114,19 @@ void SCIB_send_cmd(unsigned char *buf)
 	while(ScibRegs.SCIFFTX.bit.TXFFST!=0)
 	{}
 	//SciaRegs.SCIFFTX.bit.TXFFINTCLR=1;  // Clear Interrupt flag
-	ScibRegs.SCIFFTX.bit.TXFFINTCLR=1;  // Clear Interrupt flag
+	ScibRegs.SCIFFTX.bit.TXFFINTCLR=1;  // Clear Interrupt flag,这样才能自动进入中断
 }
 
-//串口C发送命令
-void SendCmd(unsigned char *buf)
+//串口C发送函数
+void SCIC_send_cmd(unsigned char *buf)
 {
 	unsigned char i;
 	for(i=0;i<12;i++)
 	{
 		sdataC[i]=(*(buf++));
 	}
+	while(ScicRegs.SCIFFTX.bit.TXFFST!=0)
+	{}
 	ScicRegs.SCIFFTX.bit.TXFFINTCLR=1;  // Clear Interrupt flag
 }
 
@@ -1101,6 +1142,21 @@ unsigned char XorCheckSum(unsigned char * pBuf, char len)
 		byRet = byRet^pBuf[i];
 
 	return byRet;
+}
+/*********************************************************************************************************
+** 函数名称: Vto3ByteCMD
+** 功能描述: 将设置的输出电压值转换成指令，只用于测试驱动电源
+** 输　入: 电压
+** 输　出 : 驱动电源单通道指令
+********************************************************************************************************/
+int32 Vto3ByteCMD(int V)
+{
+
+	int32 b;
+	b = V/210.0*pow(2.0,24);
+
+	return b;
+
 }
 //===========================================================================
 // No more.

@@ -54,7 +54,7 @@ void InitSci(void)
 	ScibRegs.SCIHBAUD =0x0001;  // 9600 baud @LSPCLK = 37.5MHz.
 	ScibRegs.SCILBAUD =0x00E7;
 	ScibRegs.SCIFFTX.all=0xC028;//发送深度设置为8
-	ScibRegs.SCIFFRX.all=0x0021;//接收深度设置为8
+	ScibRegs.SCIFFRX.all=0x0021;//接收深度设置为1
 	ScibRegs.SCIFFCT.all=0x0000;
 
 	//ScibRegs.SCICTL1.all =0x0023;     // Relinquish SCI from Reset
