@@ -73,7 +73,7 @@ unsigned char testdata[8];    // Received data for SCI-A
 unsigned char sdataC[12];		//Send data for SCI-C
 char tst[]="abcdefghijkl";
 char cmdupdate=0;	//0为未更新，1为已更新
-char SWITCH_FLAG;
+char Step_status;
 int32 pre_cmd=0;	//命令压力
 int32 flow_cmd=0;	//命令流量
 unsigned char pre_out[3]={0};	//压力输出
@@ -93,7 +93,7 @@ int32 pre_32_out, flow_32_out;
 int32 kd_tmp_pre, kd_tmp_flow;
 //AD\DA
 Uint16 ad[4];
-int	gStatus;
+int	Step_time;
 int i;
 unsigned char precmd_change[2];//测试，用于保存电位器旋钮的改变值
 
@@ -226,12 +226,23 @@ void main(void)
    		SCIC_send_cmd(CMD);
    while(1)
    {
-//	   if(gStatus==100)
-//	   {
-//		   StopCpuTimer0();
-//		   SWITCH_FLAG=0;
-//		   gStatus=0;
-//	   }
+	   for(i=0;i<50;i++)
+	   {
+		  testdata[0]=0x5A;
+		  testdata[1]=0x12;
+		  testdata[2]=0x34;
+		  testdata[3]=0x56;
+		  testdata[4]=0x78;
+		  testdata[5]=0x90;
+		  SCIB_send_cmd(testdata);
+	   }
+
+	   if(Step_status==0x10)
+	   {
+		   StopCpuTimer0();
+		   Step_status=0x00;
+
+	   }
        LED1=~LED1;
        DELAY_US(50000);
        LED3=~LED3;
@@ -248,16 +259,7 @@ void main(void)
 
                     	PrePID.SetCmd = BUILD_UINT32(UARTb_cmd.cmd_buffer_R[4],UARTb_cmd.cmd_buffer_R[3], UARTb_cmd.cmd_buffer_R[2]);
                     	StartCpuTimer0();
-                    	        CMD[3]=0x00;//添加CMD赋值代码
-                    			CMD[4]=0x00;
-                    			CMD[5]=0x00;
-                    			CMD[6]=0;//close Channel 2 MAX
-                    			CMD[7]=0;
-                    			CMD[8]=0;
-                    			CMD[9]=0;//Close Channel 3
-                    			CMD[10]=0;
-                    			CMD[11]=0;
-                    			SCIC_send_cmd(CMD);
+
 
 
 
@@ -265,14 +267,7 @@ void main(void)
 
                     case 0x55:  //停止
                     	StopCpuTimer0();
-							dataB[0]=0xB2;
-							dataB[1]=0xFF;
-							dataB[2]=0x0F;
-							dataB[3]=0xFF;
-							dataB[4]=0x00;
-							dataB[5]=0x00;
 
-							SCIB_send_cmd(dataB);
 
 
 
@@ -287,7 +282,13 @@ void main(void)
     		   switch(UARTb_cmd.cmd_buffer_R[1])
     		   {
     		         case 0xAA:  //PID参数设置+阶跃测试
+    		        	 PrePID.Kp = UARTb_cmd.cmd_buffer_R[2];
+    		        	 PrePID.Ki = UARTb_cmd.cmd_buffer_R[3];
+    		        	 PrePID.Kd = UARTb_cmd.cmd_buffer_R[4];
 
+    		        	 Step_status=0x01;  //阶跃开始
+    		        	 Step_time=0;  //初始化阶跃时间
+    		        	 StartCpuTimer0();
     		        	 break;
     		         case 0x55:  //PID参数设置
 
@@ -356,8 +357,8 @@ void InitParameter(void)
 {
 	char i;
 	//以下三个参数根据实际情况调节
-	SWITCH_FLAG=0;
-	gStatus=0;
+	Step_status=0;
+	Step_time=0;
 	PrePID.Kp = 0.2;
 	PrePID.Ki = 0.04;
 	PrePID.Kd = 0.2;
@@ -566,7 +567,7 @@ interrupt void sciaRxFifoIsr(void)
 			{
 				//启动停止压力控制
 				case 0xB1:
-					SWITCH_FLAG=0;//PID与控制程序的切换开关
+					Step_status=0;//PID与控制程序的切换开关
 					if(testdata[2]==0xAA)
 					{
 						PrePID.SetCmd = BUILD_UINT32(testdata[5], testdata[4], testdata[3]);
@@ -582,7 +583,7 @@ interrupt void sciaRxFifoIsr(void)
 					break;
 				//启动停止流量控制
 				case 0xB3:
-					SWITCH_FLAG=0;
+					Step_status=0;
 					if(testdata[2]==0xAA)//启动
 					{
 						flow_cmd = BUILD_UINT32(testdata[5], testdata[4], testdata[3]);
@@ -601,7 +602,7 @@ interrupt void sciaRxFifoIsr(void)
 					kp_pre=testdata[3];
 					ki_pre=(float32)(testdata[4]/1000);
 					kd_pre=testdata[5];
-					SWITCH_FLAG=1;
+					Step_status=1;
 					PrePID.SetCmd=0xFFFFFF;
 					StartCpuTimer0();
 					break;
@@ -610,7 +611,7 @@ interrupt void sciaRxFifoIsr(void)
 					kp_flow=testdata[3];
 					ki_flow=(float32)(testdata[4]/1000);
 					kd_flow=testdata[5];
-					SWITCH_FLAG=1;
+					Step_status=1;
 					flow_cmd=0xFFFFFF;
 					StartCpuTimer1();
 					break;
@@ -821,11 +822,14 @@ interrupt void ISRTimer0(void)
 		pre_change[7]=0x23;
 		//SCIB_send_cmd(pre_change);
 
-		if(SWITCH_FLAG==1)
+		if(Step_status==0x01)
 		{
-			gStatus++;
-			if(gStatus==101)
-				gStatus=0;
+			Step_time++;
+			if(Step_time==100)
+			{
+				Step_time=0;
+				Step_status=0x10;
+			}
 		}
 	}
 //	else//读取压力传感器的值
@@ -837,7 +841,7 @@ interrupt void ISRTimer0(void)
 //		pre_cmd_data[6] = XorCheckSum(pre_cmd_data,6);
 //		SCIB_send_cmd(pre_cmd_data);//发送输出命令
 //#endif
-//		if(SWITCH_FLAG==0)
+//		if(Step_status==0)
 //			//pre_act_data[1]=0xB2;
 //		else
 //			//pre_act_data[1]=0xB7;
@@ -907,7 +911,7 @@ interrupt void ISRTimer1(void)
 	}
 //	else//读取流量传感器的值
 //	{
-//		if(SWITCH_FLAG==0)
+//		if(Step_status==0)
 //			//flow_act_data[1]=0xB4;
 //		else
 //			//flow_act_data[1]=0xB8;

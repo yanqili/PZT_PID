@@ -51,8 +51,8 @@ void InitSci(void)
 				                   // Disable RX ERR, SLEEP, TXWAKE
 	ScibRegs.SCICTL2.bit.TXINTENA =1;	//使能TXRDY中断，表示由TXRDY状态引起中断
 	ScibRegs.SCICTL2.bit.RXBKINTENA =1;	//使能RXRDY中断，表示由RXRDY状态引起中断
-	ScibRegs.SCIHBAUD =0x0001;  // 9600 baud @LSPCLK = 37.5MHz.
-	ScibRegs.SCILBAUD =0x00E7;
+	ScibRegs.SCIHBAUD =0x0000;  // 115200 baud @LSPCLK = 37.5MHz.
+	ScibRegs.SCILBAUD =0x0028;
 	ScibRegs.SCIFFTX.all=0xC028;//发送深度设置为8
 	ScibRegs.SCIFFRX.all=0x0021;//接收深度设置为1
 	ScibRegs.SCIFFCT.all=0x0000;
@@ -74,8 +74,8 @@ void InitSci(void)
 				                                  // Disable RX ERR, SLEEP, TXWAKE
 	ScicRegs.SCICTL2.bit.TXINTENA =1;	//使能TXRDY中断，表示由TXRDY状态引起中断
 	ScicRegs.SCICTL2.bit.RXBKINTENA =1;	//使能RXRDY中断，表示由RXRDY状态引起中断
-	ScicRegs.SCIHBAUD =0x0001;  // 9600 baud @LSPCLK = 37.5MHz.
-	ScicRegs.SCILBAUD =0x00E7;
+	ScicRegs.SCIHBAUD =0x0000;  // 112500 baud @LSPCLK = 37.5MHz.
+	ScicRegs.SCILBAUD =0x0028;
 	ScicRegs.SCIFFTX.all=0xC02C;//发送深度设置为12
 	ScicRegs.SCIFFRX.all=0x002C;//接收深度设置为12
 	ScicRegs.SCIFFCT.all=0x0000;
