@@ -35,7 +35,22 @@
 #define MI_UINT32(a) (((a) >> 8) & 0xFF)
 #define LO_UINT32(a) ((a) & 0xFF)
 
-// Prototype statements for functions found within this file.
+struct	pid{
+	float	SetCmd;//定义设定值 单位：Pa
+	//int32	OutCmd;//实际输出值
+	float	Sensor;//传感器反馈  单位：Pa
+	int32   Sensor_code; //传感器反馈  AD转换得到的16位数
+	float 	err;	//定义偏差值
+	float 	err_next;//定义上一个偏差值
+	float 	err_last;//定义最上面的偏差值
+	float	integral;//梯形积分所用参数
+	float32 Kp,Ki,Kd;//定义比例、积分、微分系数
+	float   PIDout_last; //PID过程的上次输出值
+	float   PIDout_now; //PID过程的本次输出值
+	float   PIDout_incre; //PID过程的本次输出增加值
+}PrePID, FlowPID;
+
+/* 函数声明 */
 void INTConfig(void);
 void InitXintf(void);
 void SCIB_send_cmd(unsigned char *buf);
@@ -55,7 +70,8 @@ void spi_fifo_init(void);
 void spi_init(void);
 unsigned char XorCheckSum(unsigned char * pBuf, char len);
 int32 Vto3ByteCMD(int V);
-int32 PID_incr_trap(void);
+int32 PID_incr_trap(struct pid *P);
+void  PIDParameterInit(struct pid *P);
 
 interrupt void sciaTxFifoIsr(void);
 interrupt void sciaRxFifoIsr(void);
@@ -68,7 +84,7 @@ interrupt void ISRTimer0(void);
 interrupt void ISRTimer1(void);
 interrupt void ISRTimer2(void);
 
-// Global counts used in this example
+/* 全局变量定义 */
 unsigned char sdataB[8];    // Send data for SCI-B
 unsigned char dataB[6];    // the cmd for SCIB
 unsigned char testdata[8];    // Received data for SCI-A
@@ -91,7 +107,7 @@ int32 err_flow[3];
 float32 kp_pre, kd_pre, ki_pre;
 float32 kp_flow, kd_flow, ki_flow;
 int32 pre_cal[2], flow_cal[2];
-float pre_PIDout_last,pre_PIDout_now,pre_PIDout_incre;
+
 int32 pre_32_out, flow_32_out;
 float kd_tmp_pre, kd_tmp_flow;
 //AD\DA
@@ -103,17 +119,6 @@ unsigned char precmd_change[2];//测试，用于保存电位器旋钮的改变值
 int32 PIDout;
 #endif
 
-struct	pid{
-	float	SetCmd;//定义设定值 单位：Pa
-	//int32	OutCmd;//实际输出值
-	float	Sensor;//传感器反馈  单位：Pa
-	int32   Sensor_code; //传感器反馈  AD转换得到的16位数
-	float 	err;	//定义偏差值
-	float 	err_next;//定义上一个偏差值
-	float 	err_last;//定义最上面的偏差值
-	float	integral;//梯形积分所用参数
-	float32 Kp,Ki,Kd;//定义比例、积分、微分系数
-}PrePID, FlowPID;
 
 //float32 tmp;
 
@@ -234,10 +239,10 @@ void main(void)
    {
 
 
-	   if(Step_status==0x10)
+	   if(Step_status==0x10) //阶跃响应已结束
 	   {
-		   StopCpuTimer0();
-		   Step_status=0x00;
+		   StopCpuTimer0(); //停止PID过程，停止向上位机发送数据
+		   Step_status=0x00; //无阶跃响应
 
 	   }
        LED1=~LED1;
@@ -262,6 +267,7 @@ void main(void)
 
 
 #endif
+       /* 轮询识别指令，并作出应对 */
        if(Uart_Queue_getAcmd(&UARTb_cmd,&UARTb_queue))
        {
 
@@ -270,14 +276,20 @@ void main(void)
                switch(UARTb_cmd.cmd_buffer_R[1])
                {
                     case 0xAA:  //启动
-
+                    {
+                    	float P,I,D;
+                    	P = PrePID.Kp;  //暂存设定好的P、I、D参数
+                    	I = PrePID.Ki;
+                    	D = PrePID.Kd;
+                    	PIDParameterInit(&PrePID);
+                    	PrePID.Kp = P;  //恢复设定好的P、I、D参数
+						PrePID.Ki = I;
+						PrePID.Kd = D;
                     	PrePID.SetCmd = BUILD_UINT32(UARTb_cmd.cmd_buffer_R[4],UARTb_cmd.cmd_buffer_R[3], UARTb_cmd.cmd_buffer_R[2]);
                     	StartCpuTimer0();
+                        break;
+                    }
 
-
-
-
-                    break;
 
                     case 0x55:  //停止
                     	StopCpuTimer0();
@@ -291,25 +303,47 @@ void main(void)
 
 
             }
+    	   if(UARTb_cmd.cmd_buffer_R[0]==0xB2) //设定控制压力值
+		   {
+			  switch(UARTb_cmd.cmd_buffer_R[1])
+			  {
+				   case 0x55:  //设定值
+
+					PrePID.SetCmd = BUILD_UINT32(UARTb_cmd.cmd_buffer_R[4],UARTb_cmd.cmd_buffer_R[3], UARTb_cmd.cmd_buffer_R[2]);
+					break;
+
+			  }
+
+
+		   }
     	   if(UARTb_cmd.cmd_buffer_R[0]==0xB5) //压力PID参数调节
     	   {
     		   switch(UARTb_cmd.cmd_buffer_R[1])
     		   {
     		         case 0xAA:  //PID参数设置+阶跃测试
-    		        	 PrePID.Kp = (float)UARTb_cmd.cmd_buffer_R[2]/10.0;//将PID参数还原成小数
-    		        	 PrePID.Ki = (float)UARTb_cmd.cmd_buffer_R[3]/10.0;
-    		        	 PrePID.Kd = (float)UARTb_cmd.cmd_buffer_R[4]/10.0;
+    		        	 {
+    		        		 float setcmd;
+							 setcmd = PrePID.SetCmd; //保存本次阶跃响应的设定值
+							 PIDParameterInit(&PrePID); //所有PID相关参数初始化
+							 PrePID.SetCmd = setcmd;
+							 PrePID.Kp = (float)UARTb_cmd.cmd_buffer_R[2]/10.0;//将PID参数还原成小数
+							 PrePID.Ki = (float)UARTb_cmd.cmd_buffer_R[3]/10.0;
+							 PrePID.Kd = (float)UARTb_cmd.cmd_buffer_R[4]/10.0;
 
-    		        	 Step_status=0x01;  //阶跃开始
-    		        	 Step_time=0;  //初始化阶跃时间
-    		        	 StartCpuTimer0();
-    		        	 break;
+							 Step_status=0x01;  //阶跃开始
+							 Step_time=0;  //初始化阶跃时间
+
+							 StartCpuTimer0();
+    		        	     break;
+    		        	 }
+
+
     		         case 0x55:  //PID参数设置
 
 						 PrePID.Kp = (float)UARTb_cmd.cmd_buffer_R[2]/10.0;
 						 PrePID.Ki = (float)UARTb_cmd.cmd_buffer_R[3]/10.0;
 						 PrePID.Kd = (float)UARTb_cmd.cmd_buffer_R[4]/10.0;
-					//下面是临时测试驱动电源代码
+					/*下面是临时测试驱动电源代码
 						if(PrePID.Kp>100)  //降额实验，不大于100V
 						{
 							PrePID.Kp = 100;
@@ -324,17 +358,7 @@ void main(void)
 						CMD[9]=0;//Close Channel 3
 						CMD[10]=0;
 						CMD[11]=0;
-						SCIC_send_cmd(CMD);
-							 dataB[0]=0xB2;
-							 dataB[1]=0xFF;
-							 dataB[2]=(unsigned char)(PrePID.Kp*10);
-							 dataB[3]=(unsigned char)(PrePID.Ki*10);
-							 dataB[4]=(unsigned char)(PrePID.Kd*10);
-							 dataB[5]=0xFF;
-							 for(i=0;i<100;i++)
-							 {
-								 SCIB_send_cmd(dataB);
-							 }
+						SCIC_send_cmd(CMD);  */
 
 
 
@@ -346,6 +370,27 @@ void main(void)
 
 
     	   }
+    	   if(UARTb_cmd.cmd_buffer_R[0]==0xB9) //压力微调
+		   {
+			  switch(UARTb_cmd.cmd_buffer_R[1])
+			  {
+				   case 0xAA:  //微加
+
+					  PrePID.SetCmd +=50;
+
+				   break;
+
+
+
+				   case 0x55:  //微减
+					  PrePID.SetCmd -=50;
+
+				   break;
+
+			  }
+
+
+		   }
        }
 #ifdef DEBUG
 	   if(testdata[0]==0x5A)
@@ -371,41 +416,13 @@ void InitParameter(void)
 {
 	char i;
 	//以下三个参数根据实际情况调节
-	Step_status=0;
+	Step_status=0; //阶跃响应参数初始化
 	Step_time=0;
-	PrePID.Kp = 0.2;
-	PrePID.Ki = 0.04;
-	PrePID.Kd = 0.2;
-	PrePID.SetCmd = 100000 ;
-	PrePID.Sensor = 0;
-	PrePID.Sensor_code=0;
-	PrePID.err = 0;
-	PrePID.err_last = 0;
-	PrePID.err_next = 0;
-	PrePID.integral = 0;
-	//kp_pre = 0.2;//PID参数
-	//ki_pre = 0.04;
-	//kd_pre = 0.2;
-	pre_cal[0]=0;
-	pre_cal[1]=0;
-	FlowPID.Kp = 0.2;
-	FlowPID.Ki = 0.04;
-	FlowPID.Kd = 0.2;
-	FlowPID.SetCmd = 0;
-	FlowPID.Sensor = 0;
-	FlowPID.Sensor_code=0;
-	FlowPID.err = 0;
-	FlowPID.err_last = 0;
-	FlowPID.err_next = 0;
-	FlowPID.integral = 0;
-	//kp_flow = 0.2;//PID参数
-	//ki_flow = 0.04;
-	//kd_flow = 0.2;
-	pre_PIDout_last=0;
-	pre_PIDout_now=0;
-	pre_PIDout_incre=0;
-	flow_cal[0]=0;
-	flow_cal[1]=0;
+	PIDParameterInit(&PrePID); //PID参数初始化
+	PIDParameterInit(&FlowPID);
+
+
+
 	for(i=0;i<8;i++)
 		testdata[i]=0;
 	for(i=0;i<8;i++)
@@ -433,7 +450,22 @@ void InitParameter(void)
 	sdataB[7]=0x23;
 
 }
-
+void PIDParameterInit(struct pid *P)
+{
+	    P->Kp = 0.4;
+		P->Ki = 0.2;
+		P->Kd = 0.2;
+		P->SetCmd = 0 ;
+		P->Sensor = 0;
+		P->Sensor_code=0;
+		P->err = 0;
+		P->err_last = 0;
+		P->err_next = 0;
+		P->integral = 0;
+        P->PIDout_incre = 0;
+        P->PIDout_last = 0;
+        P->PIDout_now = 0;
+}
 void ADInit(void)
 {
 	EALLOW;
@@ -776,9 +808,9 @@ interrupt void scicTxFifoIsr(void)
 ********************************************************************************************************/
 interrupt void ISRTimer0(void)
 {
-	char index;
+
 	unsigned char pre_change[8];
-	int32 PIDout;
+	int32 sensor;
 	PID_start=1;
 	DINT;
 	PieCtrlRegs.PIEACK.all = PIEACK_GROUP1;
@@ -788,8 +820,8 @@ interrupt void ISRTimer0(void)
 	/* 真实PID时，用此处代码，上传AD转换的传感器值；模拟PID时不用
 	dataB[0]=0xB2;
 	dataB[1]=0xFF;
-	dataB[2]=MI_UINT32(PrePID.Sensor_code);
-	dataB[3]=LO_UINT32(PrePID.Sensor_code);
+	dataB[2]=MI_UINT32(P->Sensor_code);
+	dataB[3]=LO_UINT32(P->Sensor_code);
 	dataB[4]=0xFF;
 	dataB[5]=0x00;
 
@@ -800,12 +832,12 @@ interrupt void ISRTimer0(void)
 	{
 
 
-		PIDout = PID_incr_trap();
+		sensor = PID_incr_trap(&PrePID); //增量型PID过程
 		dataB[0]=0xB7;
 		dataB[1]=0xFF;
-		dataB[2]=HI_UINT32(PIDout);
-		dataB[3]=MI_UINT32(PIDout);
-		dataB[4]=LO_UINT32(PIDout);
+		dataB[2]=HI_UINT32(sensor);
+		dataB[3]=MI_UINT32(sensor);
+		dataB[4]=LO_UINT32(sensor);
 		dataB[5]=0x00;
 
 		SCIB_send_cmd(dataB);
@@ -849,9 +881,9 @@ interrupt void ISRTimer0(void)
 //			//pre_act_data[1]=0xB2;
 //		else
 //			//pre_act_data[1]=0xB7;
-//		//pre_act_data[3] = HI_UINT32(PrePID.Sensor);
-//		//pre_act_data[4] = MI_UINT32(PrePID.Sensor);
-//		//pre_act_data[5] = LO_UINT32(PrePID.Sensor);
+//		//pre_act_data[3] = HI_UINT32(P->Sensor);
+//		//pre_act_data[4] = MI_UINT32(P->Sensor);
+//		//pre_act_data[5] = LO_UINT32(P->Sensor);
 //		//pre_act_data[6] = XorCheckSum(pre_act_data,6);
 //		//SCIB_send_cmd(pre_act_data);
 //		//发送传感器读数
@@ -983,8 +1015,8 @@ interrupt void ISRTimer2(void)
 	if(ad[3]>50000)
 		ad[3]=0;
 
-		PrePID.Sensor_code=ad[2];//保存反馈的最原始的压力数据
-		PrePID.Sensor=ad[2]/32768.0*2500000;
+	    PrePID.Sensor_code=ad[2];//保存反馈的最原始的压力数据
+	    PrePID.Sensor=ad[2]/32768.0*2500000;
 		//CMD_Change[2]=0xAA;
 		//CMD_Change[3]=0;
 		//precmd_change[0]=MI_UINT32(ad[2]);//此处将电位器AD转换值保存到全局变量中去，并在定时器0中将此数发送到上位机，这里没有进行单位变换，保证了数据能够无损转换
@@ -1166,39 +1198,40 @@ int32 Vto3ByteCMD(int V)
 ** 输　入: 电压
 ** 输　出 : 驱动电源单通道指令
 ********************************************************************************************************/
-int32 PID_incr_trap(void)
+int32 PID_incr_trap(struct pid *P)
 {
     float index;
-	PrePID.err = PrePID.SetCmd - PrePID.Sensor;//此时的pre_sensor已经转换成和0xFFFFFF一样的单位
+
+	P->err = P->SetCmd - P->Sensor;//此时的pre_sensor已经转换成和0xFFFFFF一样的单位
 	//积分分离的算法，变积分PID在积分分离算法中实现
-	if(abs(PrePID.err)>INTE_SEP)//INTE_SEP根据实际情况决定
+	if(abs(P->err)>INTE_SEP)//INTE_SEP根据实际情况决定
 		index = 0;
 	else
 	{
 		index = 1;
-		//PrePID.integral += PrePID.err;//梯形积分提高稳态误差精度
+		//P->integral += P->err;//梯形积分提高稳态误差精度
 	}
 	//增量型PID 梯形积分
-	kd_tmp_pre = (PrePID.err-2*PrePID.err_next+PrePID.err_last);
-	pre_PIDout_incre= PrePID.Kp*(PrePID.err-PrePID.err_next)+index*PrePID.Ki*(PrePID.err+PrePID.err_next)/2+PrePID.Kd*kd_tmp_pre;
-	pre_PIDout_now = pre_PIDout_last+pre_PIDout_incre;
-	pre_PIDout_last = pre_PIDout_now;
-	PrePID.Sensor = pre_PIDout_now;//此处用PID输出值当做反馈值
+
+	P->PIDout_incre= P->Kp*(P->err-P->err_next)+index*P->Ki*(P->err+P->err_next)/2+P->Kd*(P->err-2*P->err_next+P->err_last);
+	P->PIDout_now = P->PIDout_last+P->PIDout_incre;
+	P->PIDout_last = P->PIDout_now;
+	P->Sensor = P->PIDout_now;//此处用PID输出值当做反馈值
 	//pre_32_out = pre_cmd+pre_cal[1];
 	//pre_32_out = pre_32_out+pre_cal[1];//计算的pre_cal[1]对应的是本次执行的控制增量，因此输出需要加上上次的输出值。
 	//此处加判断，进行抗积分饱和过程
-	if(pre_PIDout_now>PREUMAX)
+	if(P->PIDout_now>PREUMAX)
 	{
-		pre_PIDout_now = 0xFFFFFF;
+		P->PIDout_now = 0xFFFFFF;
 	}
-	else if(pre_PIDout_now<PREUMIN)
+	else if(P->PIDout_now<PREUMIN)
 	{
-		pre_PIDout_now = 0;
+		P->PIDout_now = 0;
 	}
 
-	PrePID.err_last = PrePID.err_next;
-	PrePID.err_next = PrePID.err;
-	return PrePID.Sensor;
+	P->err_last = P->err_next;
+	P->err_next = P->err;
+	return P->Sensor;
 
 }
 //===========================================================================
