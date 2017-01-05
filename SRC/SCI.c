@@ -5,6 +5,7 @@
 
 //宏定义
 //#define DEBUG
+//#define DEBUG_PID
 #define	CPU_CLK	150e6
 #define	AD7606_BASIC	(*((volatile  Uint16 *)0x200000))
 #define AD_BUSY			GpioDataRegs.GPBDAT.bit.GPIO60
@@ -22,7 +23,7 @@
 #define FLOSAMP			GpioDataRegs.GPADAT.bit.GPIO6
 #define CMD_ZERO		(int32)0x1745D1
 #define CMD_SCALE		(float32)(0xFFFFFF/11)*10
-#define INTE_SEP		(int32)381300	//积分分离参数
+#define INTE_SEP		(int32)200000	//积分分离参数
 #define PREUMAX			(int32)0xFFFFFF	//压力输出最大值，防止积分饱和
 #define PREUMIN			0				//压力输出最小值，防止积分饱和
 
@@ -54,6 +55,7 @@ void spi_fifo_init(void);
 void spi_init(void);
 unsigned char XorCheckSum(unsigned char * pBuf, char len);
 int32 Vto3ByteCMD(int V);
+int32 PID_incr_trap(void);
 
 interrupt void sciaTxFifoIsr(void);
 interrupt void sciaRxFifoIsr(void);
@@ -89,24 +91,27 @@ int32 err_flow[3];
 float32 kp_pre, kd_pre, ki_pre;
 float32 kp_flow, kd_flow, ki_flow;
 int32 pre_cal[2], flow_cal[2];
+float pre_PIDout_last,pre_PIDout_now,pre_PIDout_incre;
 int32 pre_32_out, flow_32_out;
-int32 kd_tmp_pre, kd_tmp_flow;
+float kd_tmp_pre, kd_tmp_flow;
 //AD\DA
 Uint16 ad[4];
 int	Step_time;
 int i;
 unsigned char precmd_change[2];//测试，用于保存电位器旋钮的改变值
-
+#ifdef DEBUG_PID
+int32 PIDout;
+#endif
 
 struct	pid{
-	int32	SetCmd;//定义设定值 单位：Pa
+	float	SetCmd;//定义设定值 单位：Pa
 	//int32	OutCmd;//实际输出值
-	int32	Sensor;//传感器反馈  单位：Pa
+	float	Sensor;//传感器反馈  单位：Pa
 	int32   Sensor_code; //传感器反馈  AD转换得到的16位数
-	int16 	err;	//定义偏差值
-	int16 	err_next;//定义上一个偏差值
-	int16 	err_last;//定义最上面的偏差值
-	int16	integral;//梯形积分所用参数
+	float 	err;	//定义偏差值
+	float 	err_next;//定义上一个偏差值
+	float 	err_last;//定义最上面的偏差值
+	float	integral;//梯形积分所用参数
 	float32 Kp,Ki,Kd;//定义比例、积分、微分系数
 }PrePID, FlowPID;
 
@@ -186,11 +191,11 @@ void main(void)
    ConfigCpuTimer(&CpuTimer0, 150, 20000);  //20ms
    ConfigCpuTimer(&CpuTimer1, 150, 5000); // 5ms
    ConfigCpuTimer(&CpuTimer2, 150, 5000); //5ms
-   StartCpuTimer2();
+   //StartCpuTimer2();
 
    StopCpuTimer0();
    StopCpuTimer1();
-   //StopCpuTimer2();
+   StopCpuTimer2();
 
 #ifdef DEBUG
    PID_start=1;
@@ -224,18 +229,10 @@ void main(void)
    		CMD[10]=0;
    		CMD[11]=0;
    		SCIC_send_cmd(CMD);
+
    while(1)
    {
-	   for(i=0;i<50;i++)
-	   {
-		  testdata[0]=0x5A;
-		  testdata[1]=0x12;
-		  testdata[2]=0x34;
-		  testdata[3]=0x56;
-		  testdata[4]=0x78;
-		  testdata[5]=0x90;
-		  SCIB_send_cmd(testdata);
-	   }
+
 
 	   if(Step_status==0x10)
 	   {
@@ -247,7 +244,24 @@ void main(void)
        DELAY_US(50000);
        LED3=~LED3;
        DELAY_US(50000);
+#ifdef DEBUG_PID
+       i=0;
+       while(i<5)
+       {
+			PIDout = PID_incr_trap();
+			dataB[0]=0xB7;
+			dataB[1]=0xFF;
+			dataB[2]=HI_UINT32(PIDout);
+			dataB[3]=MI_UINT32(PIDout);
+			dataB[4]=LO_UINT32(PIDout);
+			dataB[5]=0x00;
 
+			SCIB_send_cmd(dataB);
+    	    i++;
+       }
+
+
+#endif
        if(Uart_Queue_getAcmd(&UARTb_cmd,&UARTb_queue))
        {
 
@@ -282,9 +296,9 @@ void main(void)
     		   switch(UARTb_cmd.cmd_buffer_R[1])
     		   {
     		         case 0xAA:  //PID参数设置+阶跃测试
-    		        	 PrePID.Kp = UARTb_cmd.cmd_buffer_R[2];
-    		        	 PrePID.Ki = UARTb_cmd.cmd_buffer_R[3];
-    		        	 PrePID.Kd = UARTb_cmd.cmd_buffer_R[4];
+    		        	 PrePID.Kp = (float)UARTb_cmd.cmd_buffer_R[2]/10.0;//将PID参数还原成小数
+    		        	 PrePID.Ki = (float)UARTb_cmd.cmd_buffer_R[3]/10.0;
+    		        	 PrePID.Kd = (float)UARTb_cmd.cmd_buffer_R[4]/10.0;
 
     		        	 Step_status=0x01;  //阶跃开始
     		        	 Step_time=0;  //初始化阶跃时间
@@ -292,9 +306,9 @@ void main(void)
     		        	 break;
     		         case 0x55:  //PID参数设置
 
-						 PrePID.Kp = UARTb_cmd.cmd_buffer_R[2];
-						 PrePID.Ki = UARTb_cmd.cmd_buffer_R[3];
-						 PrePID.Kd = UARTb_cmd.cmd_buffer_R[4];
+						 PrePID.Kp = (float)UARTb_cmd.cmd_buffer_R[2]/10.0;
+						 PrePID.Ki = (float)UARTb_cmd.cmd_buffer_R[3]/10.0;
+						 PrePID.Kd = (float)UARTb_cmd.cmd_buffer_R[4]/10.0;
 					//下面是临时测试驱动电源代码
 						if(PrePID.Kp>100)  //降额实验，不大于100V
 						{
@@ -313,9 +327,9 @@ void main(void)
 						SCIC_send_cmd(CMD);
 							 dataB[0]=0xB2;
 							 dataB[1]=0xFF;
-							 dataB[2]=PrePID.Kp;
-							 dataB[3]=PrePID.Ki;
-							 dataB[4]=PrePID.Kd;
+							 dataB[2]=(unsigned char)(PrePID.Kp*10);
+							 dataB[3]=(unsigned char)(PrePID.Ki*10);
+							 dataB[4]=(unsigned char)(PrePID.Kd*10);
 							 dataB[5]=0xFF;
 							 for(i=0;i<100;i++)
 							 {
@@ -362,7 +376,7 @@ void InitParameter(void)
 	PrePID.Kp = 0.2;
 	PrePID.Ki = 0.04;
 	PrePID.Kd = 0.2;
-	PrePID.SetCmd = 0;
+	PrePID.SetCmd = 100000 ;
 	PrePID.Sensor = 0;
 	PrePID.Sensor_code=0;
 	PrePID.err = 0;
@@ -387,6 +401,9 @@ void InitParameter(void)
 	//kp_flow = 0.2;//PID参数
 	//ki_flow = 0.04;
 	//kd_flow = 0.2;
+	pre_PIDout_last=0;
+	pre_PIDout_now=0;
+	pre_PIDout_incre=0;
 	flow_cal[0]=0;
 	flow_cal[1]=0;
 	for(i=0;i<8;i++)
@@ -761,12 +778,14 @@ interrupt void ISRTimer0(void)
 {
 	char index;
 	unsigned char pre_change[8];
+	int32 PIDout;
 	PID_start=1;
 	DINT;
 	PieCtrlRegs.PIEACK.all = PIEACK_GROUP1;
 	CpuTimer0Regs.TCR.bit.TIF=1;	//定时器到指定时间，置标志位
 	CpuTimer0Regs.TCR.bit.TRB=1;	//重载Timer0的定时数据
 
+	/* 真实PID时，用此处代码，上传AD转换的传感器值；模拟PID时不用
 	dataB[0]=0xB2;
 	dataB[1]=0xFF;
 	dataB[2]=MI_UINT32(PrePID.Sensor_code);
@@ -775,40 +794,25 @@ interrupt void ISRTimer0(void)
 	dataB[5]=0x00;
 
     SCIB_send_cmd(dataB);
-
+    */
 
 	if(PID_start==1)//执行压力PID过程
 	{
-//		PrePID.err = PrePID.SetCmd - PrePID.Sensor;//此时的pre_sensor已经转换成和0xFFFFFF一样的单位
-//		//积分分离的算法，变积分PID在积分分离算法中实现
-//		if(abs(PrePID.err)>INTE_SEP)//INTE_SEP根据实际情况决定
-//			index = 0;
-//		else
-//		{
-//			index = 1;
-//			PrePID.integral += PrePID.err;//梯形积分提高稳态误差精度
-//		}
-//		kd_tmp_pre = (PrePID.err-2*PrePID.err_next+PrePID.err_last);
-//		pre_cal[1] = PrePID.Kp*(PrePID.err-PrePID.err_next)+index*PrePID.Ki*PrePID.integral/2+PrePID.Kd*kd_tmp_pre+pre_cal[0];
-//		pre_cal[0]=pre_cal[1];
-//		//pre_32_out = pre_cmd+pre_cal[1];
-//		pre_32_out = pre_32_out+pre_cal[1];//计算的pre_cal[1]对应的是本次执行的控制增量，因此输出需要加上上次的输出值。
-//		//此处加判断，进行抗积分饱和过程
-//		if(pre_32_out>PREUMAX)
-//		{
-//			pre_32_out = 0xFFFFFF;
-//		}
-//		else if(pre_32_out<PREUMIN)
-//		{
-//			pre_32_out = 0;
-//		}
-//		//下一步实现变积分PID
-//		PrePID.err_last = PrePID.err_next;
-//		PrePID.err_next = PrePID.err;
-//
-//		pre_out[0] = HI_UINT32(pre_32_out);
-//		pre_out[1] = MI_UINT32(pre_32_out);
-//		pre_out[2] = LO_UINT32(pre_32_out);
+
+
+		PIDout = PID_incr_trap();
+		dataB[0]=0xB7;
+		dataB[1]=0xFF;
+		dataB[2]=HI_UINT32(PIDout);
+		dataB[3]=MI_UINT32(PIDout);
+		dataB[4]=LO_UINT32(PIDout);
+		dataB[5]=0x00;
+
+		SCIB_send_cmd(dataB);
+
+		pre_out[0] = HI_UINT32(pre_32_out);
+		pre_out[1] = MI_UINT32(pre_32_out);
+		pre_out[2] = LO_UINT32(pre_32_out);
 		//添加CMD赋值代码
 
 		//下面的代码目的是更新上位机命令输入框的值
@@ -1154,6 +1158,47 @@ int32 Vto3ByteCMD(int V)
 	b = (V+10)/210.0*pow(2.0,24);
 
 	return b;
+
+}
+/*********************************************************************************************************
+** 函数名称: PID_incr_trap
+** 功能描述: 增量PID，用的是梯形积分，并且积分分离
+** 输　入: 电压
+** 输　出 : 驱动电源单通道指令
+********************************************************************************************************/
+int32 PID_incr_trap(void)
+{
+    float index;
+	PrePID.err = PrePID.SetCmd - PrePID.Sensor;//此时的pre_sensor已经转换成和0xFFFFFF一样的单位
+	//积分分离的算法，变积分PID在积分分离算法中实现
+	if(abs(PrePID.err)>INTE_SEP)//INTE_SEP根据实际情况决定
+		index = 0;
+	else
+	{
+		index = 1;
+		//PrePID.integral += PrePID.err;//梯形积分提高稳态误差精度
+	}
+	//增量型PID 梯形积分
+	kd_tmp_pre = (PrePID.err-2*PrePID.err_next+PrePID.err_last);
+	pre_PIDout_incre= PrePID.Kp*(PrePID.err-PrePID.err_next)+index*PrePID.Ki*(PrePID.err+PrePID.err_next)/2+PrePID.Kd*kd_tmp_pre;
+	pre_PIDout_now = pre_PIDout_last+pre_PIDout_incre;
+	pre_PIDout_last = pre_PIDout_now;
+	PrePID.Sensor = pre_PIDout_now;//此处用PID输出值当做反馈值
+	//pre_32_out = pre_cmd+pre_cal[1];
+	//pre_32_out = pre_32_out+pre_cal[1];//计算的pre_cal[1]对应的是本次执行的控制增量，因此输出需要加上上次的输出值。
+	//此处加判断，进行抗积分饱和过程
+	if(pre_PIDout_now>PREUMAX)
+	{
+		pre_PIDout_now = 0xFFFFFF;
+	}
+	else if(pre_PIDout_now<PREUMIN)
+	{
+		pre_PIDout_now = 0;
+	}
+
+	PrePID.err_last = PrePID.err_next;
+	PrePID.err_next = PrePID.err;
+	return PrePID.Sensor;
 
 }
 //===========================================================================
